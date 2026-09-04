@@ -1,0 +1,26 @@
+---
+description: Agent must not run terminal commands; code edits only
+alwaysApply: true
+---
+
+# No shell commands — code edits only
+
+Do **not** run terminal, shell, or CLI commands in this project.
+
+## Allowed
+
+- Read, create, and edit files in the workspace
+- Answer questions using code and docs already in the repo
+- Tell the user exactly what commands **they** should run when needed
+
+## Not allowed
+
+- `npm`, `npx`, `expo`, `gradle`, `adb`, `git`, or any other shell command
+- Background jobs, builds, installs, or log scraping via the terminal
+- "Let me run that for you" — give the user the command instead
+
+## When something needs a command
+
+1. Explain why briefly
+2. Give the user the exact command(s) to copy-paste
+3. Continue with code changes you can make without running commands
