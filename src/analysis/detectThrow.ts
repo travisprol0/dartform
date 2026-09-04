@@ -493,6 +493,7 @@ export class ThrowDetector {
     const finalized = resolvePendingThrow(this.buffer, this.pendingThrow, now);
     if (finalized) {
       this.pendingThrow = null;
+      this.armed = true;
     }
     return finalized;
   }
@@ -557,10 +558,6 @@ export class ThrowDetector {
 
     if (now - this.lastThrowAt < THROW_LOCKOUT_MS) {
       return null;
-    }
-
-    if (!this.armed) {
-      this.armed = true;
     }
 
     if (dt <= 0 || gapMs > MAX_SAMPLE_GAP_MS) {

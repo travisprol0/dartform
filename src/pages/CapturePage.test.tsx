@@ -13,10 +13,9 @@ vi.mock('../hooks/usePoseCamera', () => ({
 vi.mock('../components/PoseOverlay', async () => {
   const { createElement } = await import('react');
   return {
-    PoseOverlay: ({ mirror }: { mirror: boolean }) =>
+    PoseOverlay: () =>
       createElement('div', {
         className: 'pose-overlay-stub',
-        'data-mirror': mirror ? 'yes' : 'no',
       }),
   };
 });
@@ -61,7 +60,7 @@ function stubCamera(overrides: Partial<CameraState> = {}): {
     lastDart: null,
     previousDart: null,
     flipCamera,
-    facingMode: 'environment',
+    facingMode: 'user',
     canFlipCamera: true,
     dartsPerRound: 3,
     ...overrides,
@@ -172,7 +171,7 @@ describe('CapturePage rotation and capture HUD', () => {
     );
   });
 
-  it('mirrors the pose overlay for the user-facing camera and flips when allowed', () => {
+  it('mirrors the camera stage for the user-facing camera and flips when allowed', () => {
     const { flipCamera } = stubCamera({
       facingMode: 'user',
       canFlipCamera: true,
@@ -185,8 +184,8 @@ describe('CapturePage rotation and capture HUD', () => {
       />,
     ));
 
-    const overlay = container.querySelector('.pose-overlay-stub');
-    expect(overlay?.getAttribute('data-mirror')).toBe('yes');
+    expect(container.querySelector('.capture__stage--mirror')).not.toBeNull();
+    expect(container.querySelector('.pose-overlay-stub')).not.toBeNull();
     const flip = Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent === 'Flip',
     );
@@ -217,9 +216,8 @@ describe('CapturePage rotation and capture HUD', () => {
     expect(flip?.getAttribute('title')).toBe(
       'Camera cannot be switched during a round',
     );
-    expect(
-      container.querySelector('.pose-overlay-stub')?.getAttribute('data-mirror'),
-    ).toBe('no');
+    expect(container.querySelector('.capture__stage--mirror')).toBeNull();
+    expect(container.querySelector('.capture__stage')).not.toBeNull();
   });
 
   it('walks through arm-lock and throw status copy', () => {

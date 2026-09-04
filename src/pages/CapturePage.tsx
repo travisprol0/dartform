@@ -82,24 +82,27 @@ export function CapturePage({
 
   return (
     <div className="capture">
-      <video
-        ref={videoRef}
-        className="capture__video"
-        playsInline
-        muted
-        autoPlay
-      />
-
-      {!loading ? (
-        <PoseOverlay
-          videoRef={videoRef}
-          landmarks={poseLandmarks}
-          throwingHand={throwingHand}
-          armTracked={armTracked}
-          armStable={armVisible}
-          mirror={facingMode === 'user'}
+      <div
+        className={`capture__stage${facingMode === 'user' ? ' capture__stage--mirror' : ''}`}
+      >
+        <video
+          ref={videoRef}
+          className="capture__video"
+          playsInline
+          muted
+          autoPlay
         />
-      ) : null}
+
+        {!loading ? (
+          <PoseOverlay
+            videoRef={videoRef}
+            landmarks={poseLandmarks}
+            throwingHand={throwingHand}
+            armTracked={armTracked}
+            armStable={armVisible}
+          />
+        ) : null}
+      </div>
 
       <div className="capture__rotate" role="dialog" aria-modal="true">
         <button

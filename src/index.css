@@ -429,6 +429,15 @@ button {
   background: #000;
 }
 
+.capture__stage {
+  position: absolute;
+  inset: 0;
+}
+
+.capture__stage--mirror {
+  transform: scaleX(-1);
+}
+
 .capture__video {
   position: absolute;
   inset: 0;

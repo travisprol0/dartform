@@ -14,7 +14,6 @@ type PoseOverlayProps = {
   throwingHand: ThrowingHand;
   armTracked: boolean;
   armStable: boolean;
-  mirror: boolean;
 };
 
 export function PoseOverlay({
@@ -23,7 +22,6 @@ export function PoseOverlay({
   throwingHand,
   armTracked,
   armStable,
-  mirror,
 }: PoseOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -68,14 +66,12 @@ export function PoseOverlay({
           video,
           canvas.width,
           canvas.height,
-          mirror,
         );
         const endPoint = mapLandmarkToCanvas(
           end,
           video,
           canvas.width,
           canvas.height,
-          mirror,
         );
 
         ctx.beginPath();
@@ -108,7 +104,6 @@ export function PoseOverlay({
           video,
           canvas.width,
           canvas.height,
-          mirror,
         );
 
         ctx.beginPath();
@@ -134,7 +129,7 @@ export function PoseOverlay({
     return () => {
       observer.disconnect();
     };
-  }, [videoRef, landmarks, throwingHand, armTracked, armStable, mirror]);
+  }, [videoRef, landmarks, throwingHand, armTracked, armStable]);
 
   return (
     <canvas ref={canvasRef} className="capture__pose-canvas" aria-hidden />

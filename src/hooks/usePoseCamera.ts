@@ -37,6 +37,15 @@ const WASM_CDN =
 const MODEL_URL =
   'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task';
 
+function reportedCameraFacing(
+  facingMode: string | undefined,
+): CameraFacingMode | null {
+  if (facingMode === 'user' || facingMode === 'environment') {
+    return facingMode;
+  }
+  return null;
+}
+
 export type CaptureStatus =
   | 'finding_arm'
   | 'ready'
@@ -69,7 +78,7 @@ export function usePoseCamera({
   const [collectingPostRoll, setCollectingPostRoll] = useState(false);
   const [detectorArmed, setDetectorArmed] = useState(true);
   const [facingMode, setFacingMode] =
-    useState<CameraFacingMode>('environment');
+    useState<CameraFacingMode>('user');
 
   const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
   const throwDetectorRef = useRef(new ThrowDetector());
@@ -159,6 +168,15 @@ export function usePoseCamera({
         }
 
         streamRef.current = stream;
+        const reportedFacing = reportedCameraFacing(
+          stream.getVideoTracks()[0]?.getSettings().facingMode,
+        );
+        if (reportedFacing && reportedFacing !== facingMode) {
+          stream.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+          setFacingMode(reportedFacing);
+          return;
+        }
         const video = videoRef.current;
         if (!video) {
           stream.getTracks().forEach((track) => track.stop());

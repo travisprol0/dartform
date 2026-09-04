@@ -42,7 +42,6 @@ export function mapLandmarkToCanvas(
   video: HTMLVideoElement,
   canvasWidth: number,
   canvasHeight: number,
-  mirror: boolean,
 ): { x: number; y: number } {
   const videoWidth = video.videoWidth;
   const videoHeight = video.videoHeight;
@@ -56,12 +55,8 @@ export function mapLandmarkToCanvas(
   const offsetX = (canvasWidth - displayWidth) / 2;
   const offsetY = (canvasHeight - displayHeight) / 2;
 
-  let x = landmark.x * videoWidth * scale + offsetX;
-  const y = landmark.y * videoHeight * scale + offsetY;
-
-  if (mirror) {
-    x = canvasWidth - x;
-  }
-
-  return { x, y };
+  return {
+    x: landmark.x * videoWidth * scale + offsetX,
+    y: landmark.y * videoHeight * scale + offsetY,
+  };
 }

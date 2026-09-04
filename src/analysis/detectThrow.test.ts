@@ -397,6 +397,7 @@ describe('ThrowDetector', () => {
 
     timestamp = acceleratingThrow(detector, timestamp);
     expect(detector.isCollectingPostRoll()).toBe(true);
+    expect(detector.isArmed()).toBe(false);
 
     const { event: emitted, timestamp: afterEmit } = emitThrow(
       detector,
@@ -408,7 +409,7 @@ describe('ThrowDetector', () => {
       trace.samples[trace.samples.length - 1].timestamp - peakTime;
     expect(postRoll).toBeGreaterThanOrEqual(TRACE_AFTER_MS - FRAME_MS);
     expect(detector.isCollectingPostRoll()).toBe(false);
-    expect(detector.isArmed()).toBe(false);
+    expect(detector.isArmed()).toBe(true);
 
     timestamp = settleAt(detector, afterEmit, THROW_PEAK_WRIST, 10);
     expect(detector.isArmed()).toBe(true);
@@ -546,13 +547,13 @@ describe('ThrowDetector', () => {
     ).toBeNull();
   });
 
-  it('rearms after quiet frames and ignores fast motion while disarmed', () => {
+  it('rearms when post-roll finalizes and ignores fast motion during lockout', () => {
     const detector = new ThrowDetector();
     let timestamp = longPrime(detector, 10_000);
     timestamp = repeatThrowUntilPostRoll(detector, timestamp);
     const { timestamp: afterEmit } = emitThrow(detector, timestamp);
 
-    expect(detector.isArmed()).toBe(false);
+    expect(detector.isArmed()).toBe(true);
     expect(
       detector.addSample(poseSample(afterEmit, 0.98, 0.35)),
     ).toBeNull();
