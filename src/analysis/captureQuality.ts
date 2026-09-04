@@ -4,7 +4,7 @@ import {
   TRACE_BEFORE_MS,
   type ThrowTrace,
 } from './detectThrow';
-import { dist2d } from './geometry';
+import { dist2d, dist3d } from './geometry';
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
@@ -71,7 +71,9 @@ export function computeCaptureQuality(trace: ThrowTrace): CaptureQuality {
     frameIntervals.length > 0 ? Math.max(...frameIntervals) : 0;
 
   const forearmLengths = samples.map((sample) =>
-    dist2d(sample.elbow, sample.wrist),
+    sample.world
+      ? dist3d(sample.world.elbow, sample.world.wrist)
+      : dist2d(sample.elbow, sample.wrist),
   );
   const meanForearm = average(forearmLengths);
   const forearmScaleDrift =

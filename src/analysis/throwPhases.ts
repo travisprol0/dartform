@@ -695,7 +695,7 @@ export function analyzeThrowTrace(
     geometry: {
       cockedElbowDeg: cockedElbow,
       releaseElbowDeg: releaseElbow,
-      maxElbowExtensionDeg: maxElbowLock,
+      maxElbowLockDeg: maxElbowLock,
       elbowExtensionDeg: releaseElbow - baselineElbow,
       forearmElevationDeg: phases.forearmElevationDeg,
       upperArmElevationDeg: upperArmElevation(
@@ -760,6 +760,7 @@ export function analyzeThrowTrace(
 
   return {
     dartNumber,
+    analysisStatus: 'complete',
     peakTimestamp: peakTime,
     coachingTip: `${insight.headline}. ${insight.evidence}`,
     speedProfile,

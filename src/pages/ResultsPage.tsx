@@ -1,7 +1,15 @@
+import { useState } from 'react';
 import type { RoundSummary } from '../types/round';
 import { throwingHandLabel } from '../analysis/throwingArm';
+import { PhaseTimeline } from '../components/PhaseTimeline';
+import { ReleasePointPlot } from '../components/ReleasePointPlot';
 import { SpeedSparkline } from '../components/SpeedSparkline';
 import { ThrowCard } from '../components/ThrowCard';
+import { TrajectoryPlot } from '../components/TrajectoryPlot';
+import {
+  clearThrowHistory,
+  storedThrowCount,
+} from '../storage/throwHistory';
 
 type ResultsPageProps = {
   round: RoundSummary;
@@ -12,20 +20,67 @@ type ResultsPageProps = {
 const DART_COLORS = ['#5eead4', '#fbbf24', '#f472b6'];
 
 export function ResultsPage({ round, onThrowAgain, onDone }: ResultsPageProps) {
+  const [historyCount, setHistoryCount] = useState(() => storedThrowCount());
   const armLabel = throwingHandLabel(round.throwingHand);
   const overlayProfiles = round.darts
-    .filter((dart) => dart.speedProfile.length > 1)
     .map((dart, index) => ({
       points: dart.speedProfile,
       stroke: DART_COLORS[index % DART_COLORS.length],
-      opacity: 0.9,
-    }));
+      opacity:
+        round.comparison.outlierDart !== null &&
+        dart.dartNumber !== round.comparison.outlierDart
+          ? 0.35
+          : 0.9,
+    }))
+    .filter((profile) => profile.points.length > 1);
+  const trajectorySeries = round.darts
+    .map((dart, index) => ({
+      points: dart.trajectory,
+      label: `Dart ${dart.dartNumber}`,
+      stroke: DART_COLORS[index % DART_COLORS.length],
+      opacity:
+        round.comparison.outlierDart !== null &&
+        dart.dartNumber !== round.comparison.outlierDart
+          ? 0.35
+          : 0.9,
+    }))
+    .filter((series) => series.points.length > 1);
+  const releasePointCount = round.darts.filter(
+    (dart) => dart.groups.geometry.releasePoint !== null,
+  ).length;
 
   const avgTempo =
     round.tempoMs.length > 0
       ? round.tempoMs.reduce((sum, value) => sum + value, 0) /
         round.tempoMs.length
       : null;
+  const averageConfidence =
+    round.darts.reduce(
+      (sum, dart) => sum + dart.captureQuality.score,
+      0,
+    ) / round.darts.length;
+  const confidenceGrade =
+    averageConfidence >= 80
+      ? 'high'
+      : averageConfidence >= 55
+        ? 'medium'
+        : 'low';
+  const highConfidenceDarts = round.darts.filter(
+    (dart) =>
+      dart.analysisStatus === 'complete' &&
+      dart.captureQuality.grade !== 'low',
+  ).length;
+
+  const handleClearHistory = () => {
+    if (
+      window.confirm(
+        'Clear all locally stored throw signatures? This cannot be undone.',
+      )
+    ) {
+      clearThrowHistory();
+      setHistoryCount(0);
+    }
+  };
 
   return (
     <main className="page page--scroll">
@@ -34,67 +89,217 @@ export function ResultsPage({ round, onThrowAgain, onDone }: ResultsPageProps) {
         {round.darts.length} darts tracked on your {armLabel} arm
       </p>
 
-      <div className="summary-card">
-        <p className="summary-label">Average release angle</p>
-        <p className="summary-value">{round.avgElbowAngle.toFixed(1)}°</p>
-        <p className="summary-label">Average peak speed</p>
-        <p className="summary-value">
-          {round.avgPeakSpeed.toFixed(1)}
-          <span className="summary-unit"> forearm/s</span>
-        </p>
-        {overlayProfiles.length > 0 ? (
-          <>
-            <p className="summary-label">Speed signature overlay</p>
-            <SpeedSparkline
-              profile={[]}
-              profiles={overlayProfiles}
-              width={320}
-              height={72}
-              className="results-sparkline"
-            />
-            <div className="sparkline-legend">
-              {round.darts.map((dart, index) => (
-                <span
-                  key={dart.dartNumber}
-                  className="sparkline-legend__item"
-                  style={{ color: DART_COLORS[index % DART_COLORS.length] }}
-                >
-                  Dart {dart.dartNumber}
-                </span>
-              ))}
-            </div>
-          </>
-        ) : null}
-        <p className="consistency">{round.consistencyLabel}</p>
-        <p className="drift-headline">{round.driftHeadline}</p>
-        {avgTempo !== null ? (
-          <p className="tempo-line">
-            Avg tempo between throws: {(avgTempo / 1000).toFixed(1)} s
-          </p>
-        ) : null}
-      </div>
-
-      <div className="variability-card">
-        <h2 className="section-title">Repeatability</h2>
-        <div className="variability-grid">
-          <p className="variability-stat">
-            Release angle CV:{' '}
-            {round.metricVariability.releaseElbowCv.toFixed(0)}%
-          </p>
-          <p className="variability-stat">
-            Peak speed CV: {round.metricVariability.peakSpeedCv.toFixed(0)}%
-          </p>
-          <p className="variability-stat">
-            Stroke time CV: {round.metricVariability.strokeTimeCv.toFixed(0)}%
-          </p>
-          <p className="variability-stat">
-            Follow-through CV:{' '}
-            {round.metricVariability.followThroughCv.toFixed(0)}%
-          </p>
+      <section className="summary-card round-signature">
+        <div className="section-heading-row">
+          <div>
+            <p className="summary-label">Round signature</p>
+            <h2 className="round-headline">{round.comparison.headline}</h2>
+          </div>
+          <span
+            className={`repeatability-badge repeatability-badge--${round.comparison.band}`}
+          >
+            {round.comparison.band}
+          </span>
         </div>
-      </div>
+
+        <div className="summary-metrics">
+          <div>
+            <span>Elbow at speed peak</span>
+            <strong>{round.avgElbowAngle.toFixed(1)}°</strong>
+          </div>
+          <div>
+            <span>Relative wrist speed</span>
+            <strong>{round.avgPeakSpeed.toFixed(1)} forearms/s</strong>
+          </div>
+          {avgTempo !== null ? (
+            <div>
+              <span>Throw tempo</span>
+              <strong>{(avgTempo / 1000).toFixed(1)} s</strong>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="confidence-line">
+          <span className={`quality-badge quality-badge--${confidenceGrade}`}>
+            {Math.round(averageConfidence)}/100 capture confidence
+          </span>
+          <span>
+            {highConfidenceDarts}/{round.darts.length} darts fully analyzed
+          </span>
+        </div>
+
+        {round.personalBaseline ? (
+          <div className="personal-baseline">
+            <p className="summary-label">Compared with your recent throws</p>
+            <p className="personal-baseline__score">
+              {round.personalBaseline.signatureMatch ?? '—'}% signature match
+            </p>
+            <p>{round.personalBaseline.headline}</p>
+            <p className="personal-baseline__sample">
+              Based on {round.personalBaseline.sampleSize} valid throws stored
+              on this device.
+            </p>
+          </div>
+        ) : (
+          <p className="baseline-progress">
+            Keep throwing: after 9 valid darts, comparisons switch from generic
+            guides to your personal motion signature.
+          </p>
+        )}
+      </section>
+
+      <section className="comparison-card">
+        <h2 className="section-title">Compare darts</h2>
+        <p className="section-copy">
+          These describe repeatability, not where a dart landed. Lower spreads
+          and higher shape matches mean the camera saw a more repeatable motion.
+        </p>
+        {round.comparison.excludedDartNumbers.length > 0 ? (
+          <p className="comparison-exclusion">
+            Compared {round.comparison.comparedDartCount} high-confidence{' '}
+            {round.comparison.comparedDartCount === 1 ? 'dart' : 'darts'}.
+            Excluded{' '}
+            {round.comparison.excludedDartNumbers
+              .map((dartNumber) => `Dart ${dartNumber}`)
+              .join(', ')}.
+          </p>
+        ) : null}
+
+        <div className="comparison-grid">
+          <div>
+            <span>Release-angle spread</span>
+            <strong>{round.comparison.releaseAngleSpread.toFixed(1)}°</strong>
+          </div>
+          <div>
+            <span>Release-point spread</span>
+            <strong>
+              {round.comparison.releasePointSpread === null
+                ? '—'
+                : `${round.comparison.releasePointSpread.toFixed(2)} forearms`}
+            </strong>
+          </div>
+          <div>
+            <span>Stroke-time spread</span>
+            <strong>
+              {round.comparison.timingSpreadMs === null
+                ? '—'
+                : `${Math.round(round.comparison.timingSpreadMs)} ms`}
+            </strong>
+          </div>
+          <div>
+            <span>Speed-shape match</span>
+            <strong>
+              {round.comparison.speedSimilarity === null
+                ? '—'
+                : `${round.comparison.speedSimilarity}%`}
+            </strong>
+          </div>
+          <div>
+            <span>Path-shape match</span>
+            <strong>
+              {round.comparison.pathSimilarity === null
+                ? '—'
+                : `${round.comparison.pathSimilarity}%`}
+            </strong>
+          </div>
+          <div>
+            <span>Closest pair</span>
+            <strong>
+              {round.comparison.closestPair
+                ? `Darts ${round.comparison.closestPair[0]} + ${round.comparison.closestPair[1]}`
+                : '—'}
+            </strong>
+          </div>
+        </div>
+
+        <div className="phase-comparison">
+          <h3>Phase timing</h3>
+          {round.darts.map((dart) => (
+            <div className="phase-comparison__row" key={dart.dartNumber}>
+              <span>D{dart.dartNumber}</span>
+              <PhaseTimeline dart={dart} compact />
+            </div>
+          ))}
+        </div>
+
+        {releasePointCount >= 2 ? (
+          <div className="comparison-visual">
+            <h3>Release-proxy point scatter</h3>
+            <ReleasePointPlot
+              darts={round.darts}
+              colors={DART_COLORS}
+              outlierDart={round.comparison.outlierDart}
+              width={360}
+              height={160}
+            />
+          </div>
+        ) : null}
+
+        {trajectorySeries.length > 0 ? (
+          <div className="comparison-visual">
+            <h3>Wrist-path signature</h3>
+            <TrajectoryPlot
+              series={trajectorySeries}
+              width={360}
+              height={170}
+              className="trajectory-plot trajectory-plot--comparison"
+            />
+          </div>
+        ) : null}
+
+        {overlayProfiles.length > 0 ? (
+          <div className="comparison-visual">
+            <h3>Speed signature</h3>
+            <SpeedSparkline
+              profiles={overlayProfiles}
+              width={360}
+              height={100}
+              className="results-sparkline"
+              accessibleLabel="Overlaid relative wrist-speed signatures for all three darts."
+            />
+          </div>
+        ) : null}
+
+        <div className="sparkline-legend" aria-label="Chart legend">
+          {round.darts.map((dart, index) => (
+            <span
+              key={dart.dartNumber}
+              className="sparkline-legend__item"
+              style={{ color: DART_COLORS[index % DART_COLORS.length] }}
+            >
+              <i aria-hidden="true" />
+              Dart {dart.dartNumber}
+            </span>
+          ))}
+        </div>
+
+        <details className="variability-details">
+          <summary>Exact variation</summary>
+          <p>{round.consistencyLabel}</p>
+          <p>{round.driftHeadline}</p>
+          <div className="variability-grid">
+            <p>
+              Release angle: {round.metricVariability.releaseElbowCv.toFixed(0)}%
+            </p>
+            <p>
+              Wrist speed: {round.metricVariability.peakSpeedCv.toFixed(0)}%
+            </p>
+            <p>
+              Stroke time: {round.metricVariability.strokeTimeCv.toFixed(0)}%
+            </p>
+            <p>
+              Follow-through:{' '}
+              {round.metricVariability.followThroughCv.toFixed(0)}%
+            </p>
+          </div>
+        </details>
+      </section>
 
       <h2 className="section-title">Per dart</h2>
+      <p className="section-copy release-proxy-note">
+        “Release” is estimated at peak wrist speed. A single side camera cannot
+        see the exact instant the dart leaves your fingers.
+      </p>
       {round.darts.map((dart) => (
         <ThrowCard key={dart.dartNumber} dart={dart} />
       ))}
@@ -105,6 +310,15 @@ export function ResultsPage({ round, onThrowAgain, onDone }: ResultsPageProps) {
       <button type="button" className="secondary-button" onClick={onDone}>
         Done
       </button>
+      {historyCount > 0 ? (
+        <button
+          type="button"
+          className="history-clear-button"
+          onClick={handleClearHistory}
+        >
+          Clear {historyCount} locally stored throw signatures
+        </button>
+      ) : null}
     </main>
   );
 }

@@ -70,8 +70,42 @@ Use `vite preview` with HTTPS or a reverse proxy with mkcert for local network t
 5. Throw three darts — each throw is auto-detected.
 6. Review metrics on the results screen.
 
+## Analytics
+
+After each dart, DartForm briefly shows:
+
+- elbow angle at the wrist-speed peak
+- wrist speed normalized to forearm length
+- forward-stroke timing
+- the largest change from the previous dart
+- one confidence-aware coaching cue
+
+The round report compares phase timing, release-point spread, speed shape,
+wrist-path shape, arm geometry, follow-through, and body stability. Valid
+throws are stored as compact metric signatures in `localStorage` so later
+rounds can be compared with the user's own median motion. Camera frames and
+video are never stored.
+
+“Release” is a proxy at peak wrist speed. A single side-view phone camera
+cannot measure the exact instant the dart leaves the fingers, board accuracy,
+or true dart velocity. Relative and 3D-estimated metrics are intended for
+within-user trends, not laboratory-grade measurements.
+
+## Tests
+
+Install the updated development dependencies, run the synthetic analytics
+suite, and build the production app:
+
+```bash
+npm install
+npm test
+npm run build
+```
+
 ## Project layout
 
 - `src/pages/` — Home, Capture, Results screens
 - `src/hooks/usePoseCamera.ts` — camera + MediaPipe + throw detection
 - `src/analysis/` — throw detection and round metrics (platform-agnostic)
+- `src/storage/throwHistory.ts` — local-only personal motion baseline
+- `src/test/fixtures.ts` — deterministic synthetic throw traces

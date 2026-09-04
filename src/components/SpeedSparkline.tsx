@@ -1,22 +1,26 @@
 import type { SpeedPoint } from '../types/round';
 
 type SpeedSparklineProps = {
-  profile: SpeedPoint[];
+  profile?: SpeedPoint[];
   width?: number;
   height?: number;
   stroke?: string;
   className?: string;
   /** When set, draws multiple profiles on one axis (e.g. round overlay). */
   profiles?: { points: SpeedPoint[]; stroke: string; opacity?: number }[];
+  markers?: { timeMs: number; label: string }[];
+  accessibleLabel?: string;
 };
 
 export function SpeedSparkline({
-  profile,
+  profile = [],
   width = 200,
   height = 48,
   stroke = '#5eead4',
   className,
   profiles,
+  markers = [],
+  accessibleLabel = 'Relative wrist speed over the captured throw.',
 }: SpeedSparklineProps) {
   const allProfiles =
     profiles ??
@@ -29,7 +33,8 @@ export function SpeedSparkline({
         width={width}
         height={height}
         viewBox={`0 0 ${width} ${height}`}
-        aria-hidden
+        role="img"
+        aria-label="Relative wrist speed was unavailable for this throw."
       >
         <line
           x1={0}
@@ -65,7 +70,8 @@ export function SpeedSparkline({
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
-      aria-hidden
+      role="img"
+      aria-label={accessibleLabel}
     >
       <line
         x1={0}
@@ -87,6 +93,26 @@ export function SpeedSparkline({
           points={toPolyline(entry.points)}
         />
       ))}
+      {markers
+        .filter(
+          (marker) =>
+            marker.timeMs >= minTime && marker.timeMs <= maxTime,
+        )
+        .map((marker) => {
+          const x = ((marker.timeMs - minTime) / timeSpan) * width;
+          return (
+            <line
+              key={`${marker.label}-${marker.timeMs}`}
+              x1={x}
+              y1={0}
+              x2={x}
+              y2={height}
+              className="speed-marker"
+            >
+              <title>{marker.label}</title>
+            </line>
+          );
+        })}
     </svg>
   );
 }

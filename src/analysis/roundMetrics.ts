@@ -1,12 +1,15 @@
 import type {
+  CameraFacingMode,
   DartMetrics,
   MetricVariability,
   RoundSummary,
   ThrowingHand,
 } from '../types/round';
+import { computeCaptureQuality } from './captureQuality';
 import type { PoseSample } from './detectThrow';
 import { extractThrowTrace } from './detectThrow';
 import { elbowAngle } from './geometry';
+import { computeRoundComparison } from './roundComparison';
 import { analyzeThrowTrace } from './throwPhases';
 
 export { elbowAngle } from './geometry';
@@ -24,10 +27,18 @@ export function computeDartMetrics(
 
   const peak = buffer[peakIndex];
   const releaseAngle = elbowAngle(peak.shoulder, peak.elbow, peak.wrist);
+  const captureQuality = computeCaptureQuality(trace);
+  const insight = {
+    category: 'capture' as const,
+    metricKey: 'captureQuality',
+    headline: 'Keep the full arm visible',
+    evidence: 'More tracked frames are needed for dependable mechanics.',
+  };
   return {
     dartNumber,
+    analysisStatus: 'degraded',
     peakTimestamp: peak.timestamp,
-    coachingTip: 'Throw captured — try to keep your arm in frame for richer stats.',
+    coachingTip: `${insight.headline}. ${insight.evidence}`,
     speedProfile: [],
     phases: {
       aimHoldMs: null,
@@ -53,6 +64,68 @@ export function computeDartMetrics(
     releaseElbowAngle: releaseAngle,
     peakSpeed: 0,
     followThrough: 0,
+    groups: {
+      timing: {
+        aimHoldMs: null,
+        backswingMs: null,
+        forwardStrokeMs: null,
+        releaseProxyMs: null,
+        settleTimeMs: null,
+        totalMotionMs: null,
+        backswingToForwardRatio: null,
+      },
+      delivery: {
+        peakSpeed: 0,
+        timeToPeakMs: null,
+        meanAcceleration: null,
+        peakAcceleration: null,
+        peakLocationRatio: null,
+        smoothness: null,
+        hitchCount: null,
+      },
+      geometry: {
+        cockedElbowDeg: null,
+        releaseElbowDeg: releaseAngle,
+        maxElbowLockDeg: null,
+        elbowExtensionDeg: null,
+        forearmElevationDeg: null,
+        upperArmElevationDeg: null,
+        elbowAnchorDrift: null,
+        releasePoint: null,
+      },
+      path: {
+        backswingLength: null,
+        forwardStrokeLength: null,
+        followThroughLength: null,
+        directness: null,
+        maxDeviation: null,
+        curvature: null,
+        followThroughContinuation: null,
+      },
+      body: {
+        aimWristSway: null,
+        shoulderDrift: null,
+        headDrift: null,
+        torsoSway: null,
+        torsoLeanDeg: null,
+        outOfPlaneMotion: null,
+      },
+      hand: {
+        handAngleDeg: null,
+        wristSnapDeg: null,
+        confidence: null,
+      },
+    },
+    captureQuality,
+    phaseMarkers: {
+      aimStartMs: null,
+      motionStartMs: 0,
+      rearMs: null,
+      releaseProxyMs: 0,
+      settleMs: null,
+    },
+    trajectory: [],
+    insight,
   };
 }
 
@@ -96,7 +169,7 @@ function buildDriftHeadline(variability: MetricVariability): string {
   entries.sort((a, b) => b.cv - a.cv);
   const top = entries[0];
   if (!top || top.cv < 5) {
-    return 'Your throw signature was tight across all three darts.';
+    return 'Your valid throw signatures stayed tight on these measures.';
   }
   return `Most drift: ${top.label} (${top.cv.toFixed(0)}% variation). ${top.advice}`;
 }
@@ -104,25 +177,36 @@ function buildDriftHeadline(variability: MetricVariability): string {
 export function computeRoundSummary(
   throwingHand: ThrowingHand,
   darts: DartMetrics[],
+  facingMode: CameraFacingMode,
 ): RoundSummary {
+  const validDarts = darts.filter(
+    (dart) =>
+      dart.analysisStatus === 'complete' &&
+      dart.captureQuality.grade !== 'low',
+  );
+  const aggregateDarts = validDarts.length > 0 ? validDarts : darts;
   const avgElbowAngle =
-    darts.reduce((sum, dart) => sum + dart.releaseElbowAngle, 0) / darts.length;
+    aggregateDarts.reduce(
+      (sum, dart) => sum + dart.releaseElbowAngle,
+      0,
+    ) / aggregateDarts.length;
   const avgPeakSpeed =
-    darts.reduce((sum, dart) => sum + dart.peakSpeed, 0) / darts.length;
+    aggregateDarts.reduce((sum, dart) => sum + dart.peakSpeed, 0) /
+    aggregateDarts.length;
 
-  const angles = darts.map((dart) => dart.releaseElbowAngle);
-  const range = Math.max(...angles) - Math.min(...angles);
+  const angles = aggregateDarts.map((dart) => dart.releaseElbowAngle);
+  const comparison = computeRoundComparison(darts);
 
   let consistencyLabel: string;
-  if (range < 8) {
+  if (comparison.band === 'tight') {
     consistencyLabel =
-      'Very consistent release angles across all three darts.';
-  } else if (range < 15) {
+      'The measured timing, path, and release geometry matched tightly.';
+  } else if (comparison.band === 'mixed') {
     consistencyLabel =
-      'Moderately consistent — elbow angle varied a bit between darts.';
+      'Some parts of the motion repeated closely while others drifted.';
   } else {
     consistencyLabel =
-      'Release angles varied quite a bit — focus on repeating the same arm position.';
+      'More than one measured part of the motion varied across the round.';
   }
 
   const tempoMs: number[] = [];
@@ -132,14 +216,16 @@ export function computeRoundSummary(
 
   const metricVariability: MetricVariability = {
     releaseElbowCv: coefficientOfVariation(angles),
-    peakSpeedCv: coefficientOfVariation(darts.map((dart) => dart.peakSpeed)),
+    peakSpeedCv: coefficientOfVariation(
+      aggregateDarts.map((dart) => dart.peakSpeed),
+    ),
     strokeTimeCv: coefficientOfVariation(
-      darts
+      aggregateDarts
         .map((dart) => dart.phases.forwardStrokeMs)
         .filter((value): value is number => value !== null),
     ),
     followThroughCv: coefficientOfVariation(
-      darts
+      aggregateDarts
         .map((dart) => dart.phases.followThroughLength ?? dart.followThrough)
         .filter((value) => value > 0),
     ),
@@ -147,6 +233,7 @@ export function computeRoundSummary(
 
   return {
     throwingHand,
+    facingMode,
     darts,
     avgElbowAngle,
     avgPeakSpeed,
@@ -154,5 +241,7 @@ export function computeRoundSummary(
     driftHeadline: buildDriftHeadline(metricVariability),
     tempoMs,
     metricVariability,
+    comparison,
+    personalBaseline: null,
   };
 }

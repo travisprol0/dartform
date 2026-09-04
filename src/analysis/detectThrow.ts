@@ -19,7 +19,7 @@ export const MIN_ELBOW_EXTENSION_DEG = 8;
 export const MAX_COCKING_FLEXION_DEG = -20;
 
 /** Ignore new throws for this long after a detection. */
-export const THROW_LOCKOUT_MS = 1800;
+export const THROW_LOCKOUT_MS = 1000;
 
 /** Ring buffer size (~6 s at ~30 fps). */
 export const BUFFER_SIZE = 180;
@@ -40,6 +40,8 @@ export type ThrowTrace = {
 
 const WRIST_SMOOTHING_FRAMES = 3;
 const MAX_SAMPLE_GAP_MS = 200;
+const REARM_QUIET_SPEED = 0.12;
+const REARM_QUIET_FRAMES = 6;
 
 export type PoseSample = {
   timestamp: number;
@@ -90,13 +92,25 @@ export class ThrowDetector {
 
   private wristHistory: { x: number; y: number }[] = [];
 
+  private previousSmoothedWrist: { x: number; y: number } | null = null;
+
+  private previousSampleAt: number | null = null;
+
   private lastThrowAt = 0;
 
   private wasAboveThreshold = false;
 
-  private pendingPeak: { speed: number; timestamp: number } | null = null;
+  private pendingPeak: {
+    speed: number;
+    timestamp: number;
+    wrist: { x: number; y: number };
+  } | null = null;
 
   private pendingThrow: PendingThrow | null = null;
+
+  private armed = true;
+
+  private quietFrameCount = 0;
 
   private throwBaselineWrist: { x: number; y: number } | null = null;
 
@@ -139,20 +153,32 @@ export class ThrowDetector {
     }
 
     const { peakTimestamp, peakSpeed } = this.pendingThrow;
-    this.pendingThrow = null;
-
-    const peakIndex = this.buffer.findIndex(
+    let peakIndex = this.buffer.findIndex(
       (bufferedSample) => bufferedSample.timestamp === peakTimestamp,
     );
+    if (peakIndex < 0 && this.buffer.length > 0) {
+      peakIndex = this.buffer.reduce((nearest, sample, index) => {
+        const nearestDelta = Math.abs(
+          this.buffer[nearest].timestamp - peakTimestamp,
+        );
+        const currentDelta = Math.abs(sample.timestamp - peakTimestamp);
+        return currentDelta < nearestDelta ? index : nearest;
+      }, 0);
+    }
     if (peakIndex < 0) {
       return null;
     }
+    this.pendingThrow = null;
 
     return {
       peakIndex,
       peakSpeed,
       timestamp: peakTimestamp,
     };
+  }
+
+  advance(now: number): ThrowEvent | null {
+    return this.finalizePendingThrow(now);
   }
 
   addSample(sample: PoseSample, detectionEnabled = true): ThrowEvent | null {
@@ -166,24 +192,28 @@ export class ThrowDetector {
       },
     };
 
-    this.buffer.push(smoothedSample);
+    this.buffer.push(sample);
     if (this.buffer.length > BUFFER_SIZE) {
       this.buffer.shift();
     }
 
-    if (this.buffer.length < 2) {
+    const previousWrist = this.previousSmoothedWrist;
+    const previousSampleAt = this.previousSampleAt;
+    this.previousSmoothedWrist = smoothedWrist;
+    this.previousSampleAt = sample.timestamp;
+
+    if (!previousWrist || previousSampleAt === null) {
       this.currentWristSpeed = 0;
       return null;
     }
 
     const now = sample.timestamp;
-    const prev = this.buffer[this.buffer.length - 2];
-    const gapMs = now - prev.timestamp;
+    const gapMs = now - previousSampleAt;
     const dt = gapMs / 1000;
     let speed = 0;
     if (dt > 0 && gapMs <= MAX_SAMPLE_GAP_MS) {
-      const dx = smoothedWrist.x - prev.wrist.x;
-      const dy = smoothedWrist.y - prev.wrist.y;
+      const dx = smoothedWrist.x - previousWrist.x;
+      const dy = smoothedWrist.y - previousWrist.y;
       speed = Math.sqrt(dx * dx + dy * dy) / dt;
     }
     this.currentWristSpeed = speed;
@@ -202,12 +232,30 @@ export class ThrowDetector {
       return null;
     }
 
+    if (!this.armed) {
+      if (speed <= REARM_QUIET_SPEED) {
+        this.quietFrameCount += 1;
+      } else {
+        this.quietFrameCount = 0;
+      }
+      if (this.quietFrameCount >= REARM_QUIET_FRAMES) {
+        this.armed = true;
+      } else {
+        return null;
+      }
+    }
+
     if (now - this.lastThrowAt < THROW_LOCKOUT_MS) {
       return null;
     }
 
     if (dt <= 0 || gapMs > MAX_SAMPLE_GAP_MS) {
       this.resetMotionCandidate();
+      this.wristHistory = [sample.wrist];
+      this.previousSmoothedWrist = {
+        x: sample.wrist.x,
+        y: sample.wrist.y,
+      };
       return null;
     }
 
@@ -217,7 +265,11 @@ export class ThrowDetector {
         this.throwBaselineElbowAngle = sampleElbowAngle(smoothedSample);
       }
       if (!this.pendingPeak || speed > this.pendingPeak.speed) {
-        this.pendingPeak = { speed, timestamp: smoothedSample.timestamp };
+        this.pendingPeak = {
+          speed,
+          timestamp: smoothedSample.timestamp,
+          wrist: smoothedWrist,
+        };
       }
       this.wasAboveThreshold = true;
       return null;
@@ -235,7 +287,7 @@ export class ThrowDetector {
         return null;
       }
       const peakSample = this.buffer[peakIndex];
-      const peakWrist = peakSample.wrist;
+      const peakWrist = this.pendingPeak.wrist;
       const displacement = this.throwBaselineWrist
         ? Math.hypot(
             peakWrist.x - this.throwBaselineWrist.x,
@@ -273,6 +325,8 @@ export class ThrowDetector {
         peakTimestamp: peakSample.timestamp,
         peakSpeed,
       };
+      this.armed = false;
+      this.quietFrameCount = 0;
       return null;
     }
 
@@ -293,17 +347,45 @@ export class ThrowDetector {
     );
   }
 
+  getRecentContinuousDurationMs(): number {
+    if (this.buffer.length < 2) {
+      return 0;
+    }
+    const lastIndex = this.buffer.length - 1;
+    let startIndex = lastIndex;
+    for (let index = lastIndex; index > 0; index--) {
+      const gap =
+        this.buffer[index].timestamp - this.buffer[index - 1].timestamp;
+      if (gap > MAX_SAMPLE_GAP_MS || gap <= 0) {
+        break;
+      }
+      startIndex = index - 1;
+    }
+    return (
+      this.buffer[lastIndex].timestamp -
+      this.buffer[startIndex].timestamp
+    );
+  }
+
   isCollectingPostRoll(): boolean {
     return this.pendingThrow !== null;
+  }
+
+  isArmed(): boolean {
+    return this.armed;
   }
 
   reset(): void {
     this.buffer = [];
     this.wristHistory = [];
+    this.previousSmoothedWrist = null;
+    this.previousSampleAt = null;
     this.lastThrowAt = 0;
     this.wasAboveThreshold = false;
     this.pendingPeak = null;
     this.pendingThrow = null;
+    this.armed = true;
+    this.quietFrameCount = 0;
     this.throwBaselineWrist = null;
     this.throwBaselineElbowAngle = null;
     this.currentWristSpeed = 0;

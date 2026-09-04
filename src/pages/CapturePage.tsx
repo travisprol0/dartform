@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
+import { InstantThrowFeedback } from '../components/InstantThrowFeedback';
 import { PoseOverlay } from '../components/PoseOverlay';
-import { ThrowCard } from '../components/ThrowCard';
 import { usePoseCamera } from '../hooks/usePoseCamera';
 import { throwingHandLabel } from '../analysis/throwingArm';
 import type { RoundSummary, ThrowingHand } from '../types/round';
@@ -30,10 +30,14 @@ export function CapturePage({
     stableFramesRequired,
     wristSpeed,
     lastDart,
+    previousDart,
     poseLandmarks,
     armTracked,
+    collectingPostRoll,
+    detectorArmed,
     facingMode,
     flipCamera,
+    canFlipCamera,
     dartsPerRound,
   } = usePoseCamera({ throwingHand, onRoundComplete });
 
@@ -41,16 +45,22 @@ export function CapturePage({
 
   const statusMessage = useMemo(() => {
     if (status === 'round_complete') {
-      return 'All 3 darts recorded';
+      return 'Dart 3 recorded · Building your round';
+    }
+    if (collectingPostRoll) {
+      return 'Capturing follow-through…';
     }
     if (status === 'dart_recorded') {
       return `Dart ${dartCount} recorded`;
+    }
+    if (!detectorArmed && dartCount > 0) {
+      return 'Hold still to re-arm';
     }
     if (status === 'ready') {
       return 'Ready — throw';
     }
     return 'Find your throwing arm';
-  }, [dartCount, status]);
+  }, [collectingPostRoll, dartCount, detectorArmed, status]);
 
   if (cameraError) {
     return (
@@ -93,7 +103,17 @@ export function CapturePage({
         <button type="button" className="top-button" onClick={onCancel}>
           Cancel
         </button>
-        <button type="button" className="top-button" onClick={flipCamera}>
+        <button
+          type="button"
+          className="top-button"
+          onClick={flipCamera}
+          disabled={!canFlipCamera}
+          title={
+            canFlipCamera
+              ? 'Switch camera'
+              : 'Camera cannot be switched during a round'
+          }
+        >
           Flip
         </button>
       </div>
@@ -109,8 +129,10 @@ export function CapturePage({
         <p className="overlay-title">
           Tracking {armLabel} arm · {dartCount} / {dartsPerRound}
         </p>
-        <p className="status-line">{statusMessage}</p>
-        {!armVisible && armTracked ? (
+        <p className="status-line" aria-live="polite">
+          {statusMessage}
+        </p>
+        {!armVisible && armTracked && !collectingPostRoll ? (
           <p className="overlay-hint">Throwing arm detected — hold steady…</p>
         ) : null}
         {armVisible ? (
@@ -119,9 +141,13 @@ export function CapturePage({
           </p>
         ) : null}
 
-        {status === 'dart_recorded' && lastDart ? (
+        {(status === 'dart_recorded' || status === 'round_complete') &&
+        lastDart ? (
           <div className="capture__throw-card">
-            <ThrowCard dart={lastDart} compact />
+            <InstantThrowFeedback
+              dart={lastDart}
+              previousDart={previousDart}
+            />
           </div>
         ) : null}
 

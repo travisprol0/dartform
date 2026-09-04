@@ -101,7 +101,7 @@ export type ReleasePoint = {
 export type ArmGeometryMetrics = {
   cockedElbowDeg: number | null;
   releaseElbowDeg: number;
-  maxElbowExtensionDeg: number | null;
+  maxElbowLockDeg: number | null;
   elbowExtensionDeg: number | null;
   forearmElevationDeg: number | null;
   upperArmElevationDeg: number | null;
@@ -161,6 +161,7 @@ export type CoachingInsight = {
 
 export type DartMetrics = {
   dartNumber: number;
+  analysisStatus: 'complete' | 'degraded';
   peakTimestamp: number;
   coachingTip: string;
   speedProfile: SpeedPoint[];
@@ -188,6 +189,8 @@ export type MetricVariability = {
 export type RepeatabilityBand = 'tight' | 'mixed' | 'wide';
 
 export type RoundComparison = {
+  comparedDartCount: number;
+  excludedDartNumbers: number[];
   releasePointSpread: number | null;
   releaseAngleSpread: number;
   timingSpreadMs: number | null;
