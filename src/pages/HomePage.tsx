@@ -16,13 +16,15 @@ export function HomePage({
 
   return (
     <main className="page page--centered page--home">
-      <div className="page-inner">
-        <h1 className="title">DartForm</h1>
-        <p className="subtitle">
-          Analyze your throw mechanics across three darts.
-        </p>
+      <div className="page-inner home-layout">
+        <header className="home-layout__intro">
+          <h1 className="title">DartForm</h1>
+          <p className="subtitle">
+            Analyze your throw mechanics across three darts.
+          </p>
+        </header>
 
-        <section className="section">
+        <section className="section home-layout__hand">
           <p className="section-label">Throwing hand</p>
           <div className="toggle-row">
             <button
@@ -42,7 +44,7 @@ export function HomePage({
           </div>
         </section>
 
-        <div className="setup-box">
+        <div className="setup-box home-layout__setup">
           <h2 className="setup-title">Setup</h2>
           <p className="setup-body setup-body--phone">
             Place the phone on your throwing side so the camera sees your{' '}
@@ -58,7 +60,11 @@ export function HomePage({
           </p>
         </div>
 
-        <button type="button" className="primary-button" onClick={onStartRound}>
+        <button
+          type="button"
+          className="primary-button home-layout__cta"
+          onClick={onStartRound}
+        >
           Throw 3 darts
         </button>
       </div>
