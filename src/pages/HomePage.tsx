@@ -48,17 +48,13 @@ export function HomePage({
         <div className="setup-box home-layout__setup">
           <h2 className="setup-title">Setup</h2>
           <SetupCameraDiagram throwingHand={throwingHand} />
-          <p className="setup-body setup-body--phone">
-            Place the phone on your throwing side so the camera sees your{' '}
-            {armLabel} arm in profile. Use a tripod or stable surface, then
-            throw all three darts.
+          <p className="setup-body">
+            Place the camera directly beside your {armLabel} throwing arm—not
+            in front of or behind you—so it sees your side profile. Use a tripod
+            or stable surface, then throw all three darts.
           </p>
           <p className="setup-body setup-body--note setup-body--phone">
             Rotate to landscape when the camera opens.
-          </p>
-          <p className="setup-body setup-body--desktop">
-            Stand so the camera sees your {armLabel} arm in profile, then throw
-            all three darts.
           </p>
         </div>
 

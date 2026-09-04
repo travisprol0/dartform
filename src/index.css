@@ -163,9 +163,7 @@ button {
 }
 
 .setup-diagram {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  display: block;
   margin: 0 0 12px;
 }
 
@@ -193,17 +191,9 @@ button {
   text-align: center;
 }
 
-.setup-body--desktop {
-  display: none;
-}
-
 @media (hover: hover) and (pointer: fine) {
   .setup-body--phone {
     display: none;
-  }
-
-  .setup-body--desktop {
-    display: block;
   }
 }
 
@@ -1391,7 +1381,6 @@ summary:focus-visible {
 
   .page--home .setup-diagram {
     margin-bottom: 6px;
-    gap: 8px;
   }
 
   .page--home .setup-diagram__svg {

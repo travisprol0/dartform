@@ -82,29 +82,30 @@ describe('results and home interactions', () => {
 
     expect(onThrowingHandChange).toHaveBeenCalledWith('left');
     expect(onStartRound).toHaveBeenCalledTimes(1);
-    expect(container.querySelector('.setup-body--desktop')?.textContent).toContain(
-      'Stand so the camera sees your right arm',
+    expect(container.querySelector('.setup-box')?.textContent).toContain(
+      'Place the camera directly beside your right throwing arm',
     );
-    expect(container.querySelector('.setup-body--desktop')?.textContent).not.toContain(
-      'phone',
+    expect(container.querySelector('.setup-box')?.textContent).toContain(
+      'not in front of or behind you',
     );
     expect(container.querySelector('.setup-body--phone')?.textContent).toContain(
-      'Place the phone',
+      'Rotate to landscape',
     );
     expect(container.querySelector('.setup-diagram')?.getAttribute('aria-label')).toBe(
-      'Camera setup',
-    );
-    expect(container.querySelector('.setup-diagram__caption')?.textContent).toBe(
-      'Camera at your side',
+      'Camera setup for a right-handed thrower',
     );
     expect(
-      [...container.querySelectorAll('.setup-diagram__caption')].at(-1)
-        ?.textContent,
-    ).toContain('face the camera');
-    expect(container.querySelector('.setup-diagram__scene--left')).toBeNull();
-    expect(container.querySelectorAll('.setup-diagram__scene--right').length).toBe(
-      2,
+      container.querySelector('.setup-diagram__svg')?.getAttribute('aria-label'),
+    ).toContain(
+      'place the phone directly beside your right throwing arm',
     );
+    expect(container.querySelector('.setup-diagram__caption')?.textContent).toBe(
+      'Phone beside your right arm',
+    );
+    expect(container.querySelector('.setup-diagram__placement--left')).toBeNull();
+    expect(
+      container.querySelectorAll('.setup-diagram__placement--right').length,
+    ).toBe(1);
   });
 
   it('mirrors the setup diagram for a left-handed thrower', () => {
@@ -116,8 +117,11 @@ describe('results and home interactions', () => {
       />,
     ));
 
-    expect(container.querySelectorAll('.setup-diagram__scene--left').length).toBe(
-      2,
+    expect(
+      container.querySelectorAll('.setup-diagram__placement--left').length,
+    ).toBe(1);
+    expect(container.querySelector('.setup-diagram__caption')?.textContent).toBe(
+      'Phone beside your left arm',
     );
   });
 

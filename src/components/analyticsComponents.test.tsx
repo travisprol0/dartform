@@ -418,13 +418,16 @@ describe('analytics result components', () => {
     expect(markup).toContain('toggle-button--active');
     expect(markup).toContain('left arm');
     expect(markup).toContain('setup-body--phone');
-    expect(markup).toContain('Place the phone');
+    expect(markup).toContain(
+      'Place the camera directly beside your left throwing arm',
+    );
+    expect(markup).toContain('not in front of or behind you');
     expect(markup).toContain('Rotate to landscape when the camera opens');
-    expect(markup).toContain('setup-body--desktop');
-    expect(markup).toContain('Stand so the camera sees your left arm');
-    expect(markup).toContain('setup-diagram__scene--left');
-    expect(markup).toContain('Camera at your side');
-    expect(markup).toContain('face the camera');
+    expect(markup).toContain('setup-diagram__placement--left');
+    expect(markup).toContain('Camera setup for a left-handed thrower');
+    expect(markup).toContain('Phone beside your left arm');
+    expect(markup).toContain('PHONE HERE');
+    expect(markup).toContain('SIDE PROFILE');
 
     const rightMarkup = renderToStaticMarkup(
       <HomePage
@@ -435,9 +438,9 @@ describe('analytics result components', () => {
     );
     expect(rightMarkup).toContain('right arm');
     expect(rightMarkup).toContain(
-      'Stand so the camera sees your right arm',
+      'Place the camera directly beside your right throwing arm',
     );
-    expect(rightMarkup).toContain('setup-diagram__scene--right');
-    expect(rightMarkup).not.toContain('setup-diagram__scene--left');
+    expect(rightMarkup).toContain('setup-diagram__placement--right');
+    expect(rightMarkup).not.toContain('setup-diagram__placement--left');
   });
 });

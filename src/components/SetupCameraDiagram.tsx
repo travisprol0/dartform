@@ -4,18 +4,18 @@ type SetupCameraDiagramProps = {
   throwingHand: ThrowingHand;
 };
 
-const FLOOR_Y = 94;
-const LABEL_Y = 118;
-
-function CheckMark() {
+function CheckMark({ x, y }: { x: number; y: number }) {
   return (
-    <g className="setup-diagram__badge">
-      <circle cx="14" cy="14" r="11" fill="#0f766e" />
+    <g
+      className="setup-diagram__badge"
+      transform={`translate(${x} ${y})`}
+    >
+      <circle r="8" fill="#0f766e" />
       <path
-        d="M8.5 14.2l3.2 3.2 7.2-7.4"
+        d="M-3.8 0l2.5 2.6 5.3-5.4"
         fill="none"
         stroke="#5eead4"
-        strokeWidth="2.2"
+        strokeWidth="1.9"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -23,286 +23,331 @@ function CheckMark() {
   );
 }
 
-function CrossMark() {
-  return (
-    <g className="setup-diagram__badge">
-      <circle cx="14" cy="14" r="11" fill="#7f1d1d" />
-      <path
-        d="M9 9l10 10M19 9L9 19"
-        fill="none"
-        stroke="#f87171"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-      />
-    </g>
-  );
-}
-
-function SceneLabel({ x, children }: { x: number; children: string }) {
-  return (
-    <text
-      x={x}
-      y={LABEL_Y}
-      textAnchor="middle"
-      fill="#94a3b8"
-      fontSize="9"
-      fontWeight="600"
-      fontFamily="system-ui, sans-serif"
-    >
-      {children}
-    </text>
-  );
-}
-
-function DartboardOnStand({ cx }: { cx: number }) {
-  const cy = 40;
+function Board() {
   return (
     <g>
-      <line
-        x1={cx}
-        y1={cy + 12}
-        x2={cx}
-        y2={FLOOR_Y - 6}
-        stroke="#64748b"
-        strokeWidth="1.5"
-      />
-      <line
-        x1={cx - 9}
-        y1={FLOOR_Y}
-        x2={cx + 9}
-        y2={FLOOR_Y}
-        stroke="#64748b"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
+      <text
+        x="105"
+        y="12"
+        textAnchor="middle"
+        fill="#94a3b8"
+        fontSize="7.5"
+        fontWeight="700"
+        letterSpacing="0.7"
+        fontFamily="system-ui, sans-serif"
+      >
+        BOARD
+      </text>
       <g fill="none" stroke="#94a3b8" strokeWidth="1.3">
-        <circle cx={cx} cy={cy} r="11" />
-        <circle cx={cx} cy={cy} r="7" />
-        <circle cx={cx} cy={cy} r="2.4" fill="#5eead4" stroke="#0f766e" />
+        <circle cx="105" cy="27" r="11" />
+        <circle cx="105" cy="27" r="7" />
+        <circle cx="105" cy="27" r="2.4" fill="#5eead4" stroke="#0f766e" />
       </g>
     </g>
   );
 }
 
-function ProfileThrower({
-  cx,
-  facing,
-}: {
-  cx: number;
-  facing: 'left' | 'right';
-}) {
-  const dir = facing === 'left' ? -1 : 1;
-  const headY = 28;
-  const shoulderY = 42;
-  const hipY = 60;
-  const handX = cx + dir * 24;
-  const handY = 32;
-  const frontFootX = cx + dir * 5;
-  const backFootX = cx - dir * 9;
-
+function ThrowDirection() {
   return (
-    <g fill="none" stroke="#e2e8f0" strokeWidth="2.2" strokeLinecap="round">
-      <circle cx={cx} cy={headY} r="7" />
-      <path d={`M${cx} ${headY + 7}V${hipY}`} />
-      <path d={`M${cx} ${hipY}L${frontFootX} ${FLOOR_Y}`} />
-      <path d={`M${cx} ${hipY}L${backFootX} ${FLOOR_Y}`} />
-      <path
-        d={`M${cx} ${shoulderY}L${handX} ${handY}`}
+    <g>
+      <line
+        x1="105"
+        y1="63"
+        x2="105"
+        y2="43"
         stroke="#5eead4"
-        strokeWidth="2.8"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        markerEnd="url(#setup-arrow)"
       />
-      <circle cx={handX} cy={handY} r="2.1" fill="#5eead4" stroke="none" />
+      <text
+        x="119"
+        y="55"
+        fill="#5eead4"
+        fontSize="7.5"
+        fontWeight="700"
+        letterSpacing="0.5"
+        fontFamily="system-ui, sans-serif"
+      >
+        THROW
+      </text>
     </g>
   );
 }
 
-function FrontThrower({ cx }: { cx: number }) {
-  return (
-    <g fill="none" stroke="#e2e8f0" strokeWidth="2.2" strokeLinecap="round">
-      <circle cx={cx} cy={26} r="7" />
-      <path d={`M${cx} 33V56`} />
-      <path d={`M${cx - 11} 42h22`} />
-      <path d={`M${cx} 56L${cx - 8} ${FLOOR_Y}`} />
-      <path d={`M${cx} 56L${cx + 8} ${FLOOR_Y}`} />
-    </g>
-  );
-}
-
-function PhoneOnStand({
-  x,
-  lens,
-}: {
-  x: number;
-  lens: 'left' | 'right' | 'front';
-}) {
-  const width = 12;
-  const height = 20;
-  const top = 38;
-  const left = x - width / 2;
-  const midY = top + height / 2;
+function ThrowerFromAbove({ throwingHand }: { throwingHand: ThrowingHand }) {
+  const rightArmColor = throwingHand === 'right' ? '#5eead4' : '#94a3b8';
+  const leftArmColor = throwingHand === 'left' ? '#5eead4' : '#94a3b8';
 
   return (
-    <g>
+    <g fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <circle
+        cx="105"
+        cy="72"
+        r="7"
+        fill="#0f172a"
+        stroke="#e2e8f0"
+        strokeWidth="2"
+      />
       <line
-        x1={x}
-        y1={top + height}
-        x2={x}
-        y2={FLOOR_Y - 6}
-        stroke="#64748b"
-        strokeWidth="1.5"
+        x1="105"
+        y1="79"
+        x2="105"
+        y2="101"
+        stroke="#e2e8f0"
+        strokeWidth="2.2"
       />
       <path
-        d={`M${x - 11} ${FLOOR_Y}L${x} ${FLOOR_Y - 6}L${x + 11} ${FLOOR_Y}`}
-        fill="none"
-        stroke="#64748b"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        d="M105 101L96 115M105 101l9 14"
+        stroke="#e2e8f0"
+        strokeWidth="2.2"
       />
-      <rect
-        x={left}
-        y={top}
-        width={width}
-        height={height}
-        rx="2.2"
-        fill="#0f172a"
-        stroke="#94a3b8"
-        strokeWidth="1.4"
+      <path
+        d="M105 84L92 86 88 101"
+        stroke={leftArmColor}
+        strokeWidth={throwingHand === 'left' ? 2.8 : 2}
       />
-      <rect
-        x={left + 2}
-        y={top + 3.5}
-        width={width - 4}
-        height={height - 9}
-        rx="1"
-        fill="#334155"
+      <path
+        d="M105 84l13 2 4 15"
+        stroke={rightArmColor}
+        strokeWidth={throwingHand === 'right' ? 2.8 : 2}
       />
-      {lens === 'left' ? (
-        <circle cx={left} cy={midY} r="1.7" fill="#5eead4" />
-      ) : null}
-      {lens === 'right' ? (
-        <circle cx={left + width} cy={midY} r="1.7" fill="#5eead4" />
-      ) : null}
-      {lens === 'front' ? (
-        <circle cx={x} cy={top + height - 2.2} r="1.7" fill="#f87171" />
-      ) : null}
+      <circle
+        cx={throwingHand === 'right' ? 122 : 88}
+        cy="101"
+        r="2"
+        fill="#5eead4"
+        stroke="none"
+      />
+      <text
+        x="105"
+        y="125"
+        textAnchor="middle"
+        fill="#cbd5e1"
+        fontSize="8"
+        fontWeight="700"
+        fontFamily="system-ui, sans-serif"
+      >
+        YOU
+      </text>
     </g>
   );
 }
 
-function SideViewScene({ throwingHand }: { throwingHand: ThrowingHand }) {
-  const isLeft = throwingHand === 'left';
-  const boardX = isLeft ? 126 : 22;
-  const youX = isLeft ? 80 : 68;
-  const phoneX = isLeft ? 24 : 124;
-  const facing = isLeft ? 'right' : 'left';
-  const lens = isLeft ? 'right' : 'left';
-  const torsoNear = youX + (isLeft ? -10 : 10);
-  const lensX = isLeft ? phoneX + 6 : phoneX - 6;
-
-  const conePoints = isLeft
-    ? `${lensX},48 ${torsoNear},34 ${torsoNear},72`
-    : `${lensX},48 ${torsoNear},34 ${torsoNear},72`;
+function PhonePlacement({ throwingHand }: { throwingHand: ThrowingHand }) {
+  const isRight = throwingHand === 'right';
+  const side = isRight ? 1 : -1;
+  const phoneX = isRight ? 177 : 33;
+  const lensX = phoneX - side * 7;
+  const bodyEdgeX = 105 + side * 13;
+  const conePoints = `${lensX},87 ${bodyEdgeX},66 ${bodyEdgeX},108`;
 
   return (
     <g>
-      <line
-        x1="10"
-        y1={FLOOR_Y}
-        x2="138"
-        y2={FLOOR_Y}
-        stroke="#334155"
-        strokeWidth="1"
-      />
-      <DartboardOnStand cx={boardX} />
       <polygon
         points={conePoints}
-        fill="rgba(94, 234, 212, 0.2)"
+        fill="rgba(94, 234, 212, 0.16)"
         stroke="#5eead4"
-        strokeWidth="1.1"
+        strokeWidth="1"
       />
-      <ProfileThrower cx={youX} facing={facing} />
-      <PhoneOnStand x={phoneX} lens={lens} />
-      <SceneLabel x={boardX}>Board</SceneLabel>
-      <SceneLabel x={youX}>You</SceneLabel>
-      <SceneLabel x={phoneX}>Phone</SceneLabel>
+      <line
+        x1={lensX}
+        y1="87"
+        x2="105"
+        y2="87"
+        stroke="#5eead4"
+        strokeWidth="1.2"
+        strokeDasharray="3 3"
+      />
+      <rect
+        x={phoneX - 7}
+        y="74"
+        width="14"
+        height="26"
+        rx="3"
+        fill="#0f172a"
+        stroke="#5eead4"
+        strokeWidth="1.8"
+      />
+      <rect
+        x={phoneX - 4.5}
+        y="78"
+        width="9"
+        height="17"
+        rx="1.5"
+        fill="#334155"
+      />
+      <circle cx={lensX} cy="87" r="2" fill="#5eead4" />
+      <text
+        x={phoneX}
+        y="113"
+        textAnchor="middle"
+        fill="#5eead4"
+        fontSize="8"
+        fontWeight="800"
+        fontFamily="system-ui, sans-serif"
+      >
+        PHONE HERE
+      </text>
+      <text
+        x={phoneX}
+        y="123"
+        textAnchor="middle"
+        fill="#94a3b8"
+        fontSize="7"
+        fontWeight="700"
+        letterSpacing="0.4"
+        fontFamily="system-ui, sans-serif"
+      >
+        {isRight ? 'RIGHT SIDE' : 'LEFT SIDE'}
+      </text>
     </g>
   );
 }
 
-function FaceOnScene() {
-  const youX = 58;
-  const phoneX = 96;
+function CameraView({ throwingHand }: { throwingHand: ThrowingHand }) {
+  const direction = throwingHand === 'right' ? 1 : -1;
+  const centerX = 266;
+  const handX = centerX + direction * 18;
+  const frontFootX = centerX + direction * 5;
+  const backFootX = centerX - direction * 8;
 
   return (
     <g>
+      <rect
+        x="218"
+        y="8"
+        width="94"
+        height="114"
+        rx="7"
+        fill="#111c2f"
+        stroke="#334155"
+      />
+      <text
+        x="265"
+        y="22"
+        textAnchor="middle"
+        fill="#94a3b8"
+        fontSize="7.5"
+        fontWeight="700"
+        letterSpacing="0.6"
+        fontFamily="system-ui, sans-serif"
+      >
+        CAMERA VIEW
+      </text>
+      <rect
+        x="226"
+        y="29"
+        width="78"
+        height="70"
+        rx="4"
+        fill="#0f172a"
+        stroke="#334155"
+      />
       <line
-        x1="10"
-        y1={FLOOR_Y}
-        x2="138"
-        y2={FLOOR_Y}
+        x1="233"
+        y1="91"
+        x2="297"
+        y2="91"
         stroke="#334155"
         strokeWidth="1"
       />
-      <FrontThrower cx={youX} />
-      <polygon
-        points="90,48 64,30 52,58"
-        fill="rgba(248, 113, 113, 0.2)"
-        stroke="#f87171"
-        strokeWidth="1.1"
-      />
-      <PhoneOnStand x={phoneX} lens="front" />
-      <SceneLabel x={youX}>You</SceneLabel>
-      <SceneLabel x={phoneX}>Phone</SceneLabel>
+      <g
+        fill="none"
+        stroke="#e2e8f0"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <circle cx={centerX} cy="45" r="6" />
+        <path d={`M${centerX} 51V72`} />
+        <path d={`M${centerX} 72L${frontFootX} 91`} />
+        <path d={`M${centerX} 72L${backFootX} 91`} />
+        <path
+          d={`M${centerX} 58L${handX} 50`}
+          stroke="#5eead4"
+          strokeWidth="2.8"
+        />
+        <circle cx={handX} cy="50" r="2" fill="#5eead4" stroke="none" />
+      </g>
+      <CheckMark x={296} y={37} />
+      <text
+        x="265"
+        y="113"
+        textAnchor="middle"
+        fill="#5eead4"
+        fontSize="8"
+        fontWeight="800"
+        fontFamily="system-ui, sans-serif"
+      >
+        SIDE PROFILE
+      </text>
     </g>
   );
 }
 
 export function SetupCameraDiagram({ throwingHand }: SetupCameraDiagramProps) {
-  const sceneClass =
+  const placementClass =
     throwingHand === 'left'
-      ? 'setup-diagram__scene setup-diagram__scene--left'
-      : 'setup-diagram__scene setup-diagram__scene--right';
+      ? 'setup-diagram__placement setup-diagram__placement--left'
+      : 'setup-diagram__placement setup-diagram__placement--right';
+  const throwingSide = `${throwingHand} throwing arm`;
 
   return (
-    <div className="setup-diagram" role="group" aria-label="Camera setup">
+    <div
+      className="setup-diagram"
+      role="group"
+      aria-label={`Camera setup for a ${throwingHand}-handed thrower`}
+    >
       <figure className="setup-diagram__panel">
         <svg
           className="setup-diagram__svg"
-          viewBox="0 0 148 126"
-          aria-label="Correct: stand the camera beside you so it sees your throwing arm"
+          viewBox="0 0 320 130"
+          role="img"
+          aria-label={`Top view: place the phone directly beside your ${throwingSide}, at a right angle to your throw line, so the camera sees your side profile`}
         >
-          <g className={sceneClass}>
-            <SideViewScene throwingHand={throwingHand} />
+          <defs>
+            <marker
+              id="setup-arrow"
+              viewBox="0 0 6 6"
+              refX="5"
+              refY="3"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto"
+            >
+              <path d="M0 0l6 3-6 3z" fill="#5eead4" />
+            </marker>
+          </defs>
+          <text
+            x="10"
+            y="14"
+            fill="#94a3b8"
+            fontSize="7.5"
+            fontWeight="700"
+            letterSpacing="0.6"
+            fontFamily="system-ui, sans-serif"
+          >
+            TOP VIEW
+          </text>
+          <g className={placementClass}>
+            <Board />
+            <ThrowDirection />
+            <PhonePlacement throwingHand={throwingHand} />
+            <ThrowerFromAbove throwingHand={throwingHand} />
           </g>
-          <CheckMark />
-        </svg>
-        <figcaption className="setup-diagram__caption">
-          Camera at your side
-        </figcaption>
-      </figure>
-
-      <figure className="setup-diagram__panel">
-        <svg
-          className="setup-diagram__svg"
-          viewBox="0 0 148 126"
-          aria-label="Wrong: do not face the camera"
-        >
-          <g className={sceneClass}>
-            <FaceOnScene />
-          </g>
-          <path
-            className="setup-diagram__x"
-            d="M22 18l104 92M126 18L22 110"
-            fill="none"
-            stroke="#f87171"
-            strokeWidth="5"
-            strokeLinecap="round"
+          <line
+            x1="211"
+            y1="9"
+            x2="211"
+            y2="121"
+            stroke="#334155"
+            strokeWidth="1"
           />
-          <CrossMark />
+          <CameraView throwingHand={throwingHand} />
         </svg>
         <figcaption className="setup-diagram__caption">
-          Don’t face the camera
+          Phone beside your {throwingHand} arm
         </figcaption>
       </figure>
     </div>
