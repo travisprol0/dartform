@@ -23,13 +23,13 @@ export const MIN_PEAK_SPEED = 1.4;
 export const MIN_THROW_DISPLACEMENT = 0.08;
 
 /** Elbow must extend by at least this many degrees during the motion. */
-export const MIN_ELBOW_EXTENSION_DEG = 3;
+export const MIN_ELBOW_EXTENSION_DEG = 8;
 
 /** Strong flexion indicates cocking/repositioning, not a release. */
 export const MAX_COCKING_FLEXION_DEG = -20;
 
 /** Ignore new throws for this long after a detection. */
-export const THROW_LOCKOUT_MS = 1000;
+export const THROW_LOCKOUT_MS = 600;
 
 /** Ring buffer size (~6 s at ~30 fps). */
 export const BUFFER_SIZE = 180;
@@ -57,12 +57,36 @@ export const MIN_BACKSWING_FLEXION_DEG = 8;
 /**
  * Cock-then-extend still needs a real stroke. Slow uncocking is ~0.5 m/s.
  */
-export const THROW_SHAPE_MIN_PEAK_SPEED = 0.8;
+export const THROW_SHAPE_MIN_PEAK_SPEED = 1.25;
 
 /**
  * Already-cocked snap throw, in forearm-lengths per second.
  */
 export const SNAP_THROW_NORMALIZED_SPEED = 8;
+
+/** Later darts in a round must reach this fraction of the last accepted peak. */
+export const MIN_RELATIVE_PEAK_RATIO = 0.5;
+
+/** Drop to this fraction of peak speed (while still moving) starts a valley. */
+export const VALLEY_SPEED_RATIO = 0.45;
+
+/** Ignore intra-stroke dips; a second throw is slower than a cock-to-release. */
+export const MIN_VALLEY_SEPARATION_MS = 180;
+
+/** Brief quiet below the speed bar, then a rise, ends the prior throw. */
+export const MIN_RESUME_QUIET_MS = 50;
+
+/** Vertical-only reaches this far, with little forward travel, is a raise. */
+export const ARM_RAISE_UPWARD_MIN_M = 0.08;
+
+/** Forward/depth travel below this, with a raise, is not a release. */
+export const ARM_RAISE_FORWARD_MAX_M = 0.07;
+
+/** Fast raises can still be throws; slower vertical motion is a reach. */
+export const ARM_RAISE_SPEED_MAX = 3;
+
+/** Hip midpoint travel that indicates walking to the board. */
+export const MIN_HIP_TRAVEL_M = 0.18;
 
 const SHAPE_LOOKBACK_MS = 1000;
 const WRIST_SMOOTHING_FRAMES = 3;
@@ -227,6 +251,82 @@ export function wristTravelMeters(
   return scaledImageTravel(from.wrist, to.wrist, to);
 }
 
+/**
+ * +1 if sample Y increases toward the head (world Y-up), -1 if Y increases
+ * toward the feet (image / BlazePose Y-down). Used so "upward" is against gravity.
+ */
+function verticalUpSign(sample: PoseSample): number {
+  const hip = hipMidpoint(sample);
+  const shoulderY = sample.world?.shoulder?.y ?? sample.shoulder.y;
+  if (hip) {
+    const direction = Math.sign(shoulderY - hip.y);
+    if (direction !== 0) {
+      return direction;
+    }
+  }
+  return -1;
+}
+
+function signedUpwardDelta(
+  fromY: number,
+  toY: number,
+  sample: PoseSample,
+): number {
+  return (toY - fromY) * verticalUpSign(sample);
+}
+
+export function wristTravelComponents(
+  from: PoseSample,
+  to: PoseSample,
+): { upward: number; forward: number } {
+  const fromWorld = worldWrist(from);
+  const toWorld = worldWrist(to);
+  if (fromWorld && toWorld) {
+    return {
+      upward: signedUpwardDelta(fromWorld.y, toWorld.y, to),
+      forward: Math.hypot(toWorld.x - fromWorld.x, toWorld.z - fromWorld.z),
+    };
+  }
+  const scale = CANONICAL_FOREARM_LENGTH_M / imageForearmLength(to);
+  return {
+    upward: signedUpwardDelta(from.wrist.y, to.wrist.y, to) * scale,
+    forward: Math.abs(to.wrist.x - from.wrist.x) * scale,
+  };
+}
+
+function hipMidpoint(sample: PoseSample): WristPoint | null {
+  if (sample.world?.leftHip && sample.world?.rightHip) {
+    return {
+      x: (sample.world.leftHip.x + sample.world.rightHip.x) / 2,
+      y: (sample.world.leftHip.y + sample.world.rightHip.y) / 2,
+      z: (sample.world.leftHip.z + sample.world.rightHip.z) / 2,
+    };
+  }
+  if (sample.leftHip && sample.rightHip) {
+    return {
+      x: (sample.leftHip.x + sample.rightHip.x) / 2,
+      y: (sample.leftHip.y + sample.rightHip.y) / 2,
+      z: 0,
+    };
+  }
+  return null;
+}
+
+export function hipTravelMeters(
+  from: PoseSample,
+  to: PoseSample,
+): number | null {
+  const fromHip = hipMidpoint(from);
+  const toHip = hipMidpoint(to);
+  if (!fromHip || !toHip) {
+    return null;
+  }
+  if (from.world?.leftHip && to.world?.leftHip) {
+    return dist3d(fromHip, toHip);
+  }
+  return scaledImageTravel(fromHip, toHip, to);
+}
+
 export function sampleAtOrBefore(
   buffer: PoseSample[],
   targetTime: number,
@@ -286,6 +386,10 @@ export function evaluateThrowCandidate(params: {
   elbowExtension: number;
   backswingFlexion?: number;
   forearmNormalizedSpeed?: number;
+  upwardTravel?: number;
+  forwardTravel?: number;
+  hipTravel?: number;
+  previousPeakSpeed?: number;
 }): string | null {
   if (params.peakSpeed < THROW_SPEED_THRESHOLD) {
     return 'peak_speed';
@@ -312,6 +416,28 @@ export function evaluateThrowCandidate(params: {
   }
   if (params.displacement < MIN_THROW_DISPLACEMENT) {
     return 'displacement';
+  }
+  if (
+    params.hipTravel !== undefined &&
+    params.hipTravel >= MIN_HIP_TRAVEL_M
+  ) {
+    return 'hip_travel';
+  }
+  if (
+    params.upwardTravel !== undefined &&
+    params.forwardTravel !== undefined &&
+    params.upwardTravel >= ARM_RAISE_UPWARD_MIN_M &&
+    params.forwardTravel < ARM_RAISE_FORWARD_MAX_M &&
+    params.peakSpeed < ARM_RAISE_SPEED_MAX
+  ) {
+    return 'arm_raise';
+  }
+  if (
+    params.previousPeakSpeed !== undefined &&
+    params.previousPeakSpeed > 0 &&
+    params.peakSpeed < MIN_RELATIVE_PEAK_RATIO * params.previousPeakSpeed
+  ) {
+    return 'relative_peak';
   }
   return null;
 }
@@ -418,6 +544,7 @@ export function evaluateDecelerationThrow(params: {
   throwBaselineWrist: WristPoint | null;
   throwBaselineElbowAngle: number | null;
   skipCockingRecovery?: boolean;
+  previousPeakSpeed?: number;
 }): DecelerationOutcome {
   const peakIndex = resolveThrowPeakIndex(
     params.buffer,
@@ -433,18 +560,44 @@ export function evaluateDecelerationThrow(params: {
     params.pendingPeak.timestamp - BASELINE_LOOKBACK_MS,
   );
   let displacement = 0;
+  let upwardTravel = 0;
+  let forwardTravel = 0;
+  let hipTravel: number | null = null;
   if (lookbackSample) {
     displacement = wristTravelMeters(lookbackSample, peakSample);
+    const components = wristTravelComponents(lookbackSample, peakSample);
+    upwardTravel = components.upward;
+    forwardTravel = components.forward;
+    hipTravel = hipTravelMeters(lookbackSample, peakSample);
   } else if (params.throwBaselineWrist) {
     const peakWorld = worldWrist(peakSample);
     if (peakWorld) {
       displacement = dist3d(params.throwBaselineWrist, peakWorld);
+      upwardTravel = signedUpwardDelta(
+        params.throwBaselineWrist.y,
+        peakWorld.y,
+        peakSample,
+      );
+      forwardTravel = Math.hypot(
+        peakWorld.x - params.throwBaselineWrist.x,
+        peakWorld.z - params.throwBaselineWrist.z,
+      );
     } else {
       displacement = scaledImageTravel(
         params.throwBaselineWrist,
         params.pendingPeak.wrist,
         peakSample,
       );
+      const scale = CANONICAL_FOREARM_LENGTH_M / imageForearmLength(peakSample);
+      upwardTravel =
+        signedUpwardDelta(
+          params.throwBaselineWrist.y,
+          params.pendingPeak.wrist.y,
+          peakSample,
+        ) * scale;
+      forwardTravel =
+        Math.abs(params.pendingPeak.wrist.x - params.throwBaselineWrist.x) *
+        scale;
     }
   }
   const peakElbowAngle = sampleElbowAngle(peakSample);
@@ -465,6 +618,10 @@ export function evaluateDecelerationThrow(params: {
     elbowExtension,
     backswingFlexion: shape.backswingFlexion,
     forearmNormalizedSpeed,
+    upwardTravel,
+    forwardTravel,
+    hipTravel: hipTravel ?? undefined,
+    previousPeakSpeed: params.previousPeakSpeed,
   });
 
   if (
@@ -495,6 +652,7 @@ export function evaluateDecelerationThrow(params: {
         throwBaselineWrist: params.throwBaselineWrist,
         throwBaselineElbowAngle: params.throwBaselineElbowAngle,
         skipCockingRecovery: true,
+        previousPeakSpeed: params.previousPeakSpeed,
       });
     }
   }
@@ -526,6 +684,8 @@ export class ThrowDetector {
 
   private lastThrowAt = 0;
 
+  private lastAcceptedPeakSpeed = 0;
+
   private wasAboveThreshold = false;
 
   private pendingPeak: PendingPeak | null = null;
@@ -543,6 +703,8 @@ export class ThrowDetector {
   private primed = false;
 
   private quietSince: number | null = null;
+
+  private sawValley = false;
 
   private recentGaps: number[] = [];
 
@@ -579,6 +741,45 @@ export class ThrowDetector {
     this.throwBaselineWrist = null;
     this.throwBaselineElbowAngle = null;
     this.quietSince = null;
+    this.sawValley = false;
+  }
+
+  private acceptThrow(outcome: {
+    peakTimestamp: number;
+    peakSpeed: number;
+  }): void {
+    this.lastThrowAt = outcome.peakTimestamp;
+    this.lastAcceptedPeakSpeed = outcome.peakSpeed;
+    this.pendingThrow = {
+      peakTimestamp: outcome.peakTimestamp,
+      peakSpeed: outcome.peakSpeed,
+    };
+    this.armed = false;
+    this.resetMotionCandidate();
+  }
+
+  private considerPendingPeak(detectionEnabled: boolean): boolean {
+    if (!detectionEnabled || !this.pendingPeak) {
+      return false;
+    }
+    const outcome = evaluateDecelerationThrow({
+      buffer: this.buffer,
+      pendingPeak: this.pendingPeak,
+      throwBaselineWrist: this.throwBaselineWrist,
+      throwBaselineElbowAngle: this.throwBaselineElbowAngle,
+      previousPeakSpeed: this.lastAcceptedPeakSpeed,
+    });
+    this.pendingPeak = null;
+    this.throwBaselineWrist = null;
+    this.throwBaselineElbowAngle = null;
+    this.quietSince = null;
+    this.sawValley = false;
+    this.wasAboveThreshold = false;
+    if (outcome.type !== 'accepted') {
+      return false;
+    }
+    this.acceptThrow(outcome);
+    return true;
   }
 
   private recordGap(gapMs: number): void {
@@ -677,29 +878,69 @@ export class ThrowDetector {
         speed = scaledImageSpeed(imageSpeed, sample);
       }
     }
+    const previousSpeed = this.currentWristSpeed;
     this.currentWristSpeed = speed;
 
     const finalizedThrow = this.finalizePendingThrow(now);
-    if (finalizedThrow) {
-      return finalizedThrow;
-    }
-
-    if (this.pendingThrow) {
-      return null;
-    }
-
-    if (now - this.lastThrowAt < THROW_LOCKOUT_MS) {
-      return null;
-    }
 
     if (dt <= 0 || gapMs > maxGapMs) {
       this.resetMotionCandidate();
       this.wristHistory = [rawWrist];
       this.previousSmoothedWrist = rawWrist;
-      return null;
+      return finalizedThrow;
     }
 
+    const canAccept =
+      this.pendingThrow === null &&
+      now - this.lastThrowAt >= THROW_LOCKOUT_MS;
+
     if (speed >= THROW_SPEED_THRESHOLD) {
+      const separatedFromPeak =
+        this.pendingPeak !== null &&
+        now - this.pendingPeak.timestamp >= MIN_VALLEY_SEPARATION_MS;
+      const quietDuration =
+        this.quietSince !== null ? now - this.quietSince : 0;
+      const valleyRise =
+        separatedFromPeak &&
+        this.sawValley &&
+        speed > previousSpeed;
+      const resumeAfterQuiet =
+        separatedFromPeak &&
+        this.wasAboveThreshold &&
+        quietDuration >= MIN_RESUME_QUIET_MS &&
+        quietDuration < MOTION_SETTLE_MS;
+      if ((valleyRise || resumeAfterQuiet) && canAccept) {
+        if (!detectionEnabled) {
+          return finalizedThrow;
+        }
+        const accepted = this.considerPendingPeak(true);
+        if (!accepted) {
+          this.quietSince = null;
+          if (!this.pendingPeak || speed > this.pendingPeak.speed) {
+            this.pendingPeak = {
+              speed,
+              timestamp: smoothedSample.timestamp,
+              wrist: smoothedWrist,
+            };
+            this.sawValley = false;
+          } else if (speed <= VALLEY_SPEED_RATIO * this.pendingPeak.speed) {
+            this.sawValley = true;
+          }
+          this.wasAboveThreshold = true;
+          return finalizedThrow;
+        }
+        this.throwBaselineWrist = smoothedWrist;
+        this.throwBaselineElbowAngle = sampleElbowAngle(smoothedSample);
+        this.pendingPeak = {
+          speed,
+          timestamp: smoothedSample.timestamp,
+          wrist: smoothedWrist,
+        };
+        this.wasAboveThreshold = true;
+        this.sawValley = false;
+        this.quietSince = null;
+        return finalizedThrow;
+      }
       if (!this.wasAboveThreshold) {
         this.throwBaselineWrist = smoothedWrist;
         this.throwBaselineElbowAngle = sampleElbowAngle(smoothedSample);
@@ -711,9 +952,12 @@ export class ThrowDetector {
           timestamp: smoothedSample.timestamp,
           wrist: smoothedWrist,
         };
+        this.sawValley = false;
+      } else if (speed <= VALLEY_SPEED_RATIO * this.pendingPeak.speed) {
+        this.sawValley = true;
       }
       this.wasAboveThreshold = true;
-      return null;
+      return finalizedThrow;
     }
 
     if (this.wasAboveThreshold && this.pendingPeak) {
@@ -721,38 +965,15 @@ export class ThrowDetector {
         this.quietSince = now;
       }
       if (now - this.quietSince < MOTION_SETTLE_MS) {
-        return null;
+        return finalizedThrow;
       }
-      if (!detectionEnabled) {
-        return null;
+      if (canAccept) {
+        this.considerPendingPeak(detectionEnabled);
       }
-      this.wasAboveThreshold = false;
-      this.quietSince = null;
-
-      const outcome = evaluateDecelerationThrow({
-        buffer: this.buffer,
-        pendingPeak: this.pendingPeak,
-        throwBaselineWrist: this.throwBaselineWrist,
-        throwBaselineElbowAngle: this.throwBaselineElbowAngle,
-      });
-      this.pendingPeak = null;
-      this.throwBaselineWrist = null;
-      this.throwBaselineElbowAngle = null;
-
-      if (outcome.type !== 'accepted') {
-        return null;
-      }
-
-      this.lastThrowAt = outcome.peakTimestamp;
-      this.pendingThrow = {
-        peakTimestamp: outcome.peakTimestamp,
-        peakSpeed: outcome.peakSpeed,
-      };
-      this.armed = false;
-      return null;
+      return finalizedThrow;
     }
 
-    return null;
+    return finalizedThrow;
   }
 
   getBuffer(): PoseSample[] {
@@ -813,6 +1034,7 @@ export class ThrowDetector {
     this.previousSample = null;
     this.previousSampleAt = null;
     this.lastThrowAt = 0;
+    this.lastAcceptedPeakSpeed = 0;
     this.wasAboveThreshold = false;
     this.pendingPeak = null;
     this.pendingThrow = null;
@@ -822,6 +1044,7 @@ export class ThrowDetector {
     this.currentWristSpeed = 0;
     this.primed = false;
     this.quietSince = null;
+    this.sawValley = false;
     this.recentGaps = [];
   }
 }

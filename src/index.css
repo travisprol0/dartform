@@ -162,6 +162,37 @@ button {
   font-weight: 600;
 }
 
+.setup-diagram {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.setup-diagram__panel {
+  margin: 0;
+  min-width: 0;
+}
+
+.setup-diagram__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 140px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #0f172a;
+}
+
+.setup-diagram__caption {
+  margin: 6px 0 0;
+  color: #cbd5e1;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: center;
+}
+
 .setup-body--desktop {
   display: none;
 }
@@ -1356,6 +1387,20 @@ summary:focus-visible {
 
   .page--home .setup-body--note {
     margin-top: 6px;
+  }
+
+  .page--home .setup-diagram {
+    margin-bottom: 6px;
+    gap: 8px;
+  }
+
+  .page--home .setup-diagram__svg {
+    max-height: 120px;
+  }
+
+  .page--home .setup-diagram__caption {
+    margin-top: 4px;
+    font-size: 0.6875rem;
   }
 
   .page--home .primary-button {

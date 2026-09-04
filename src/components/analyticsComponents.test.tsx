@@ -422,6 +422,9 @@ describe('analytics result components', () => {
     expect(markup).toContain('Rotate to landscape when the camera opens');
     expect(markup).toContain('setup-body--desktop');
     expect(markup).toContain('Stand so the camera sees your left arm');
+    expect(markup).toContain('setup-diagram__scene--left');
+    expect(markup).toContain('Camera at your side');
+    expect(markup).toContain('face the camera');
 
     const rightMarkup = renderToStaticMarkup(
       <HomePage
@@ -434,5 +437,7 @@ describe('analytics result components', () => {
     expect(rightMarkup).toContain(
       'Stand so the camera sees your right arm',
     );
+    expect(rightMarkup).toContain('setup-diagram__scene--right');
+    expect(rightMarkup).not.toContain('setup-diagram__scene--left');
   });
 });

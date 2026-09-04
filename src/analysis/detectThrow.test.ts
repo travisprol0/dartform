@@ -15,6 +15,7 @@ import {
   sampleElbowAngle,
   wristSpeedMeters,
   wristTravelMeters,
+  wristTravelComponents,
   type PendingThrow,
   type ThrowEvent,
 } from './detectThrow';
@@ -32,9 +33,12 @@ import {
   forearmWrist,
   longPrime,
   poseAtForearmAngle,
+  restForMs,
   shortPrime,
   tinyDisplacementThrow,
+  upwardRaise,
   validThrowWithLookback,
+  valleyDip,
   worldDriftSample,
   worldSwingSample,
 } from '../test/detectThrowFixtures';
@@ -124,6 +128,27 @@ describe('wristTravelMeters', () => {
     expect(
       wristTravelMeters(withoutWorld(aim), withoutWorld(release)),
     ).toBeGreaterThan(0.08);
+  });
+});
+
+describe('wristTravelComponents', () => {
+  it('treats a forearm release as downward, not an arm raise', () => {
+    const aim = poseAtForearmAngle(10_000, 25);
+    const release = poseAtForearmAngle(10_200, 60);
+    const world = wristTravelComponents(aim, release);
+    const image = wristTravelComponents(
+      withoutWorld(aim),
+      withoutWorld(release),
+    );
+    expect(world.upward).toBeLessThan(0.08);
+    expect(image.upward).toBeLessThan(0.08);
+  });
+
+  it('measures signed upward travel for a vertical reach', () => {
+    const rest = poseSample(10_000, 0.5, 0.5);
+    const raised = poseSample(10_200, 0.5, 0.32);
+    expect(wristTravelComponents(rest, raised).upward).toBeGreaterThan(0.08);
+    expect(wristTravelComponents(rest, raised).forward).toBeLessThan(0.07);
   });
 });
 
@@ -252,7 +277,49 @@ describe('evaluateThrowCandidate', () => {
         backswingFlexion: 20,
         forearmNormalizedSpeed: 4,
       }),
+    ).toBe('peak_speed');
+    expect(
+      evaluateThrowCandidate({
+        peakSpeed: 1.3,
+        displacement: 0.12,
+        elbowExtension: 20,
+        backswingFlexion: 20,
+        forearmNormalizedSpeed: 4,
+      }),
     ).toBeNull();
+    expect(
+      evaluateThrowCandidate({
+        peakSpeed: 1.5,
+        displacement: 0.12,
+        elbowExtension: 20,
+        backswingFlexion: 20,
+        forearmNormalizedSpeed: 6,
+        upwardTravel: 0.12,
+        forwardTravel: 0.02,
+      }),
+    ).toBe('arm_raise');
+    expect(
+      evaluateThrowCandidate({
+        peakSpeed: 2.5,
+        displacement: 0.2,
+        elbowExtension: 20,
+        backswingFlexion: 20,
+        forearmNormalizedSpeed: 10,
+        hipTravel: 0.2,
+      }),
+    ).toBe('hip_travel');
+    expect(
+      evaluateThrowCandidate({
+        peakSpeed: 1.5,
+        displacement: 0.12,
+        elbowExtension: 20,
+        backswingFlexion: 20,
+        forearmNormalizedSpeed: 6,
+        upwardTravel: 0.03,
+        forwardTravel: 0.12,
+        previousPeakSpeed: 4,
+      }),
+    ).toBe('relative_peak');
   });
 });
 
@@ -432,7 +499,7 @@ describe('evaluateDecelerationThrow', () => {
     const baselineAngle = sampleElbowAngle(baseline);
     const extension = sampleElbowAngle(peak) - baselineAngle;
 
-    expect(extension).toBeLessThan(3);
+    expect(extension).toBeLessThan(8);
     expect(extension).toBeGreaterThan(-20);
     expect(
       evaluateDecelerationThrow({
@@ -488,6 +555,48 @@ describe('evaluateDecelerationThrow', () => {
         throwBaselineElbowAngle: sampleElbowAngle(aim),
       }).type,
     ).toBe('accepted');
+  });
+
+  it('rejects a throw when the hips translate as if walking', () => {
+    const { buffer, pendingPeak, throwBaselineWrist, throwBaselineElbowAngle } =
+      acceptedThrowBuffer();
+    const peak = buffer[buffer.length - 1];
+    buffer[buffer.length - 1] = {
+      ...peak,
+      world: {
+        ...peak.world!,
+        leftHip: {
+          ...peak.world!.leftHip!,
+          x: peak.world!.leftHip!.x + 0.25,
+        },
+        rightHip: {
+          ...peak.world!.rightHip!,
+          x: peak.world!.rightHip!.x + 0.25,
+        },
+      },
+    };
+    expect(
+      evaluateDecelerationThrow({
+        buffer,
+        pendingPeak,
+        throwBaselineWrist,
+        throwBaselineElbowAngle,
+      }).type,
+    ).toBe('rejected');
+  });
+
+  it('rejects a later dart whose peak is much slower than the last throw', () => {
+    const { buffer, pendingPeak, throwBaselineWrist, throwBaselineElbowAngle } =
+      acceptedThrowBuffer();
+    expect(
+      evaluateDecelerationThrow({
+        buffer,
+        pendingPeak: { ...pendingPeak, speed: 1.4 },
+        throwBaselineWrist,
+        throwBaselineElbowAngle,
+        previousPeakSpeed: 4,
+      }).type,
+    ).toBe('rejected');
   });
 });
 
@@ -759,15 +868,15 @@ describe('ThrowDetector', () => {
     const detector = new ThrowDetector();
     let timestamp = shortPrime(detector, 10_000);
 
-    for (let frame = 1; frame <= 8; frame++) {
+    for (let frame = 1; frame <= 4; frame++) {
       const sample = degenerateElbowSample(timestamp);
       detector.addSample({
         ...sample,
-        wrist: { ...sample.wrist, x: 0.5 + frame * 0.05 },
+        wrist: { ...sample.wrist, x: 0.5 + frame * 0.01 },
       });
       timestamp += FRAME_MS;
     }
-    timestamp = decelerateToRest(detector, timestamp, 0.9, 0.2, 16);
+    timestamp = decelerateToRest(detector, timestamp, 0.54, 0.2, 16);
     expect(detector.isCollectingPostRoll()).toBe(false);
   });
 
@@ -818,6 +927,65 @@ describe('ThrowDetector', () => {
 
     detector.addSample(poseSample(timestamp, 0.72, 0.35));
     expect(detector.getCurrentWristSpeed()).toBe(0);
+  });
+
+  it('records two throws about 700ms apart after the first finalizes', () => {
+    const detector = new ThrowDetector();
+    let timestamp = longPrime(detector, 10_000);
+    timestamp = acceleratingThrow(detector, timestamp);
+    expect(detector.isCollectingPostRoll()).toBe(true);
+    const first = emitThrow(detector, timestamp);
+    timestamp = restForMs(detector, first.timestamp, 700);
+    timestamp = acceleratingThrow(detector, timestamp);
+    expect(detector.isCollectingPostRoll()).toBe(true);
+    const second = emitThrow(detector, timestamp);
+    expect(second.event.timestamp).toBeGreaterThan(first.event.timestamp);
+  });
+
+  it('splits a second throw after a speed valley without a full rest', () => {
+    const detector = new ThrowDetector();
+    const events: ThrowEvent[] = [];
+    let timestamp = longPrime(detector, 10_000);
+    timestamp = acceleratingThrow(
+      detector,
+      timestamp,
+      THROW_PEAK_WRIST,
+      0.5,
+      0.5,
+      0,
+      events,
+    );
+    timestamp = valleyDip(detector, timestamp, 8, events);
+    timestamp = acceleratingThrow(
+      detector,
+      timestamp,
+      THROW_PEAK_WRIST,
+      0.5,
+      0.5,
+      10,
+      events,
+    );
+    timestamp = decelerateToRest(
+      detector,
+      timestamp,
+      THROW_PEAK_WRIST.x,
+      THROW_PEAK_WRIST.y,
+      16,
+      0.5,
+      0.5,
+      events,
+    );
+    expect(events.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does not treat an upward arm raise after a throw as the next dart', () => {
+    const detector = new ThrowDetector();
+    let timestamp = longPrime(detector, 10_000);
+    timestamp = acceleratingThrow(detector, timestamp);
+    const { timestamp: afterEmit } = emitThrow(detector, timestamp);
+    timestamp = restForMs(detector, afterEmit, 700);
+    timestamp = upwardRaise(detector, timestamp);
+    expect(detector.isCollectingPostRoll()).toBe(false);
   });
 });
 

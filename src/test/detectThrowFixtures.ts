@@ -3,7 +3,17 @@ import {
   TRACE_AFTER_MS,
   ThrowDetector,
   type PoseSample,
+  type ThrowEvent,
 } from '../analysis/detectThrow';
+
+function recordThrowEvent(
+  events: ThrowEvent[] | undefined,
+  event: ThrowEvent | null,
+): void {
+  if (event && events) {
+    events.push(event);
+  }
+}
 import { poseSample, withoutWorld } from './fixtures';
 import type { PoseLandmark } from '../analysis/throwingArm';
 
@@ -115,14 +125,18 @@ export function acceleratingThrow(
   elbowX = 0.5,
   elbowY = 0.5,
   holdFrames = 10,
+  events?: ThrowEvent[],
 ): number {
   for (let frame = 1; frame <= 4; frame++) {
     const progress = frame / 4;
     const angle =
       AIM_FOREARM_DEG + (COCK_FOREARM_DEG - AIM_FOREARM_DEG) * progress;
     const wrist = forearmWrist(angle, elbowX, elbowY);
-    detector.addSample(
-      poseSample(timestamp, wrist.x, wrist.y, 0, elbowX, elbowY),
+    recordThrowEvent(
+      events,
+      detector.addSample(
+        poseSample(timestamp, wrist.x, wrist.y, 0, elbowX, elbowY),
+      ),
     );
     timestamp += FRAME_MS;
   }
@@ -132,20 +146,26 @@ export function acceleratingThrow(
       COCK_FOREARM_DEG +
       (RELEASE_FOREARM_DEG - COCK_FOREARM_DEG) * progress;
     const wrist = forearmWrist(angle, elbowX, elbowY);
-    detector.addSample(
-      poseSample(timestamp, wrist.x, wrist.y, 0, elbowX, elbowY),
+    recordThrowEvent(
+      events,
+      detector.addSample(
+        poseSample(timestamp, wrist.x, wrist.y, 0, elbowX, elbowY),
+      ),
     );
     timestamp += FRAME_MS;
   }
   for (let frame = 0; frame < holdFrames; frame++) {
-    detector.addSample(
-      poseSample(
-        timestamp,
-        wristAtPeak.x,
-        wristAtPeak.y,
-        0,
-        elbowX,
-        elbowY,
+    recordThrowEvent(
+      events,
+      detector.addSample(
+        poseSample(
+          timestamp,
+          wristAtPeak.x,
+          wristAtPeak.y,
+          0,
+          elbowX,
+          elbowY,
+        ),
       ),
     );
     timestamp += FRAME_MS;
@@ -161,10 +181,14 @@ export function decelerateToRest(
   frames = 10,
   elbowX = 0.5,
   elbowY = 0.5,
+  events?: ThrowEvent[],
 ): number {
   for (let frame = 0; frame < frames; frame++) {
-    detector.addSample(
-      poseSample(timestamp, wristX, wristY, 0, elbowX, elbowY),
+    recordThrowEvent(
+      events,
+      detector.addSample(
+        poseSample(timestamp, wristX, wristY, 0, elbowX, elbowY),
+      ),
     );
     timestamp += FRAME_MS;
   }
@@ -329,4 +353,66 @@ export function floodBufferBeforeFinalize(
     timestamp += FLOOD_FRAME_MS;
   }
   return timestamp;
+}
+
+export function restForMs(
+  detector: ThrowDetector,
+  timestamp: number,
+  durationMs: number,
+  wrist = THROW_PEAK_WRIST,
+  events?: ThrowEvent[],
+): number {
+  const end = timestamp + durationMs;
+  while (timestamp < end) {
+    recordThrowEvent(
+      events,
+      detector.addSample(poseSample(timestamp, wrist.x, wrist.y)),
+    );
+    timestamp += FRAME_MS;
+  }
+  return timestamp;
+}
+
+export function valleyDip(
+  detector: ThrowDetector,
+  timestamp: number,
+  frames = 8,
+  events?: ThrowEvent[],
+): number {
+  const start = THROW_PEAK_WRIST;
+  const cocked = forearmWrist(COCK_FOREARM_DEG);
+  for (let frame = 1; frame <= frames; frame++) {
+    const progress = (frame / frames) * 0.25;
+    const x = start.x + (cocked.x - start.x) * progress;
+    const y = start.y + (cocked.y - start.y) * progress;
+    recordThrowEvent(
+      events,
+      detector.addSample(poseSample(timestamp, x, y, 0, 0.5, 0.5)),
+    );
+    timestamp += FRAME_MS;
+  }
+  const hold = forearmWrist(
+    AIM_FOREARM_DEG + (COCK_FOREARM_DEG - AIM_FOREARM_DEG) * 0.25,
+  );
+  for (let frame = 0; frame < 3; frame++) {
+    recordThrowEvent(
+      events,
+      detector.addSample(poseSample(timestamp, hold.x, hold.y, 0, 0.5, 0.5)),
+    );
+    timestamp += FRAME_MS;
+  }
+  return timestamp;
+}
+
+export function upwardRaise(
+  detector: ThrowDetector,
+  timestamp: number,
+): number {
+  for (let frame = 1; frame <= 8; frame++) {
+    detector.addSample(
+      poseSample(timestamp, 0.5, 0.5 - frame * 0.03, 0, 0.5, 0.5),
+    );
+    timestamp += FRAME_MS;
+  }
+  return restForMs(detector, timestamp, 250, { x: 0.5, y: 0.26 });
 }

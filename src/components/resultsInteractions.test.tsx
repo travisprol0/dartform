@@ -91,6 +91,34 @@ describe('results and home interactions', () => {
     expect(container.querySelector('.setup-body--phone')?.textContent).toContain(
       'Place the phone',
     );
+    expect(container.querySelector('.setup-diagram')?.getAttribute('aria-label')).toBe(
+      'Camera setup',
+    );
+    expect(container.querySelector('.setup-diagram__caption')?.textContent).toBe(
+      'Camera at your side',
+    );
+    expect(
+      [...container.querySelectorAll('.setup-diagram__caption')].at(-1)
+        ?.textContent,
+    ).toContain('face the camera');
+    expect(container.querySelector('.setup-diagram__scene--left')).toBeNull();
+    expect(container.querySelectorAll('.setup-diagram__scene--right').length).toBe(
+      2,
+    );
+  });
+
+  it('mirrors the setup diagram for a left-handed thrower', () => {
+    ({ container, root } = renderPage(
+      <HomePage
+        throwingHand="left"
+        onThrowingHandChange={() => undefined}
+        onStartRound={() => undefined}
+      />,
+    ));
+
+    expect(container.querySelectorAll('.setup-diagram__scene--left').length).toBe(
+      2,
+    );
   });
 
   it('clears stored throw history after confirmation', () => {
