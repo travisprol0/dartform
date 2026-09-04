@@ -61,6 +61,7 @@ function stubCamera(overrides: Partial<CameraState> = {}): {
     previousDart: null,
     flipCamera,
     facingMode: 'user',
+    poseDelegate: 'GPU',
     canFlipCamera: true,
     dartsPerRound: 3,
     ...overrides,
@@ -406,6 +407,7 @@ describe('CapturePage rotation and capture HUD', () => {
     expect(debug).toContain('Arm visible: yes');
     expect(debug).toContain('Stable frames: 8 / 8');
     expect(debug).toContain('Wrist speed: 2.50 m/s');
+    expect(debug).toContain('Pose: GPU');
 
     act(() => {
       container
@@ -416,7 +418,7 @@ describe('CapturePage rotation and capture HUD', () => {
   });
 
   it('reports arm not visible in the debug block', () => {
-    stubCamera({ armVisible: false });
+    stubCamera({ armVisible: false, poseDelegate: 'CPU' });
     ({ container, root } = renderPage(
       <CapturePage
         throwingHand="right"
@@ -432,6 +434,9 @@ describe('CapturePage rotation and capture HUD', () => {
     });
     expect(container.querySelector('.debug-block')?.textContent).toContain(
       'Arm visible: no',
+    );
+    expect(container.querySelector('.debug-block')?.textContent).toContain(
+      'Pose: CPU',
     );
   });
 });

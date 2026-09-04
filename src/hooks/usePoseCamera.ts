@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision';
+import { FilesetResolver, type PoseLandmarker } from '@mediapipe/tasks-vision';
 import {
   MIN_READY_BUFFER_MS,
   ThrowDetector,
@@ -11,6 +11,10 @@ import {
 } from '../analysis/roundMetrics';
 import { getTrackedPoseLandmarks } from '../analysis/throwingArm';
 import type { PoseLandmark } from '../analysis/throwingArm';
+import {
+  createPoseLandmarker,
+  type PoseDelegate,
+} from '../pose/createPoseLandmarker';
 import type {
   CameraFacingMode,
   DartMetrics,
@@ -34,8 +38,6 @@ const ROUND_COMPLETE_GLANCE_MS = 2200;
 
 const WASM_CDN =
   'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm';
-const MODEL_URL =
-  'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task';
 
 function reportedCameraFacing(
   facingMode: string | undefined,
@@ -79,6 +81,7 @@ export function usePoseCamera({
   const [detectorArmed, setDetectorArmed] = useState(true);
   const [facingMode, setFacingMode] =
     useState<CameraFacingMode>('user');
+  const [poseDelegate, setPoseDelegate] = useState<PoseDelegate>('CPU');
 
   const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
   const throwDetectorRef = useRef(new ThrowDetector());
@@ -190,17 +193,7 @@ export function usePoseCamera({
         await video.play();
 
         const vision = await FilesetResolver.forVisionTasks(WASM_CDN);
-        const landmarker = await PoseLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: MODEL_URL,
-            delegate: 'CPU',
-          },
-          runningMode: 'VIDEO',
-          numPoses: 1,
-          minPoseDetectionConfidence: 0.5,
-          minPosePresenceConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-        });
+        const { landmarker, delegate } = await createPoseLandmarker(vision);
 
         if (cancelled) {
           landmarker.close();
@@ -209,6 +202,7 @@ export function usePoseCamera({
         }
 
         poseLandmarkerRef.current = landmarker;
+        setPoseDelegate(delegate);
         setLoading(false);
       } catch (error) {
         if (!cancelled) {
@@ -502,6 +496,7 @@ export function usePoseCamera({
     previousDart,
     flipCamera,
     facingMode,
+    poseDelegate,
     canFlipCamera: dartCount === 0,
     dartsPerRound: DARTS_PER_ROUND,
   };

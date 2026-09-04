@@ -36,6 +36,7 @@ export function CapturePage({
     collectingPostRoll,
     detectorArmed,
     facingMode,
+    poseDelegate,
     flipCamera,
     canFlipCamera,
     dartsPerRound,
@@ -186,6 +187,9 @@ export function CapturePage({
               </p>
               <p className="overlay-line">
                 Stable frames: {stableFrameCount} / {stableFramesRequired}
+              </p>
+              <p className="overlay-line">
+                Pose: {poseDelegate}
               </p>
               <p className="overlay-line">
                 Wrist speed: {wristSpeed.toFixed(2)} m/s
