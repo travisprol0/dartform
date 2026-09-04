@@ -120,3 +120,70 @@ export function makeAnalyzedDart(
   }
   return metrics;
 }
+
+export function makeSparseDart(
+  dartNumber = 1,
+  overrides: Partial<DartMetrics> = {},
+): DartMetrics {
+  const dart = makeAnalyzedDart(dartNumber);
+  return {
+    ...dart,
+    speedProfile: [],
+    trajectory: [],
+    phaseMarkers: {
+      ...dart.phaseMarkers,
+      rearMs: null,
+      settleMs: null,
+    },
+    groups: {
+      ...dart.groups,
+      timing: {
+        ...dart.groups.timing,
+        aimHoldMs: null,
+        backswingMs: null,
+        forwardStrokeMs: null,
+        backswingToForwardRatio: null,
+      },
+      geometry: {
+        ...dart.groups.geometry,
+        elbowExtensionDeg: null,
+        cockedElbowDeg: null,
+        maxElbowLockDeg: null,
+        forearmElevationDeg: null,
+        upperArmElevationDeg: null,
+        elbowAnchorDrift: null,
+      },
+      path: {
+        ...dart.groups.path,
+        followThroughLength: null,
+        directness: null,
+        followThroughContinuation: null,
+        forwardStrokeLength: null,
+        maxDeviation: null,
+      },
+      delivery: {
+        ...dart.groups.delivery,
+        timeToPeakMs: null,
+        peakAcceleration: null,
+        smoothness: null,
+        hitchCount: null,
+        peakLocationRatio: null,
+      },
+      body: {
+        ...dart.groups.body,
+        aimWristSway: null,
+        shoulderDrift: null,
+        headDrift: null,
+        torsoSway: null,
+        torsoLeanDeg: null,
+        outOfPlaneMotion: null,
+      },
+      hand: {
+        handAngleDeg: 5,
+        wristSnapDeg: null,
+        confidence: null,
+      },
+    },
+    ...overrides,
+  };
+}

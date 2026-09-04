@@ -269,6 +269,8 @@ export function personalizedInsightForDart(
     metricKey: largest.metricKey,
     headline: largest.headline,
     evidence: `${largest.label} was ${Math.abs(largest.delta).toFixed(largest.digits)}${largest.unit} ${direction} than your median.`,
+    action:
+      'Make a small correction toward your usual number instead of a big change.',
   };
 }
 

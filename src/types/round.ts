@@ -157,6 +157,8 @@ export type CoachingInsight = {
   headline: string;
   evidence: string;
   metricKey: string;
+  /** Short, doable cue for the next throw. */
+  action: string;
 };
 
 export type DartMetrics = {
@@ -177,6 +179,8 @@ export type DartMetrics = {
   phaseMarkers: PhaseMarkers;
   trajectory: TrajectoryPoint[];
   insight: CoachingInsight;
+  /** All matching cues, strongest first. `insight` is the primary item. */
+  insights: CoachingInsight[];
 };
 
 export type MetricVariability = {

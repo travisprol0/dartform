@@ -112,4 +112,22 @@ describe('signalProcessing', () => {
     expect(peakIndex).toBe(2);
     expect(scalarDerivative(values, samples)[2]).toBeGreaterThan(0);
   });
+
+  it('handles edge indices and 3D velocity extraction', () => {
+    const samples = [poseSample(10_000, 0.5, 0.4)];
+    expect(pointVelocities(samples, (sample) => sample.wrist)[0].speed).toBe(0);
+    expect(nearestPeakIndex(samples, [1], 4, 100)).toBe(0);
+
+    const worldSamples = [
+      poseSample(10_000, 0.5, 0.4, 0),
+      poseSample(10_100, 0.55, 0.4, 0.2),
+      poseSample(10_200, 0.6, 0.4, 0.4),
+    ];
+    const velocities3d = pointVelocities(
+      worldSamples,
+      (sample) => sample.world?.wrist,
+      '3d',
+    );
+    expect(velocities3d[1].z).not.toBe(0);
+  });
 });

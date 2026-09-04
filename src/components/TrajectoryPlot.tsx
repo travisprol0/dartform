@@ -5,6 +5,7 @@ export type TrajectorySeries = {
   label: string;
   stroke: string;
   opacity?: number;
+  dashed?: boolean;
 };
 
 type TrajectoryPlotProps = {
@@ -85,6 +86,7 @@ export function TrajectoryPlot({
               strokeWidth={2.5}
               strokeLinejoin="round"
               strokeLinecap="round"
+              strokeDasharray={entry.dashed ? '6 5' : undefined}
               opacity={entry.opacity ?? 1}
               points={polyline(entry.points)}
             />

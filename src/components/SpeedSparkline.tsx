@@ -7,7 +7,12 @@ type SpeedSparklineProps = {
   stroke?: string;
   className?: string;
   /** When set, draws multiple profiles on one axis (e.g. round overlay). */
-  profiles?: { points: SpeedPoint[]; stroke: string; opacity?: number }[];
+  profiles?: {
+    points: SpeedPoint[];
+    stroke: string;
+    opacity?: number;
+    dashed?: boolean;
+  }[];
   markers?: { timeMs: number; label: string }[];
   accessibleLabel?: string;
 };
@@ -89,6 +94,7 @@ export function SpeedSparkline({
           strokeWidth={2}
           strokeLinejoin="round"
           strokeLinecap="round"
+          strokeDasharray={entry.dashed ? '6 5' : undefined}
           opacity={entry.opacity ?? 1}
           points={toPolyline(entry.points)}
         />

@@ -97,6 +97,13 @@ export function InstantThrowFeedback({
           ? 'Personal cue based on valid throws stored on this device.'
           : dart.insight.evidence}
       </p>
+      <p className="instant-feedback__action">{dart.insight.action}</p>
+      {dart.insights.length > 1 ? (
+        <p className="instant-feedback__more">
+          {dart.insights.length - 1} other{' '}
+          {dart.insights.length === 2 ? 'note' : 'notes'} on the results screen.
+        </p>
+      ) : null}
     </section>
   );
 }

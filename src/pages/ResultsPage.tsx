@@ -1,5 +1,9 @@
 import { useState } from 'react';
 import type { RoundSummary } from '../types/round';
+import {
+  buildRoundGuideSpeedProfile,
+  buildRoundGuideTrajectory,
+} from '../analysis/formGuide';
 import { throwingHandLabel } from '../analysis/throwingArm';
 import { PhaseTimeline } from '../components/PhaseTimeline';
 import { ReleasePointPlot } from '../components/ReleasePointPlot';
@@ -18,33 +22,61 @@ type ResultsPageProps = {
 };
 
 const DART_COLORS = ['#5eead4', '#fbbf24', '#f472b6'];
+const GUIDE_STROKE = '#e2e8f0';
 
 export function ResultsPage({ round, onThrowAgain, onDone }: ResultsPageProps) {
   const [historyCount, setHistoryCount] = useState(() => storedThrowCount());
   const armLabel = throwingHandLabel(round.throwingHand);
-  const overlayProfiles = round.darts
-    .map((dart, index) => ({
-      points: dart.speedProfile,
-      stroke: DART_COLORS[index % DART_COLORS.length],
-      opacity:
-        round.comparison.outlierDart !== null &&
-        dart.dartNumber !== round.comparison.outlierDart
-          ? 0.35
-          : 0.9,
-    }))
-    .filter((profile) => profile.points.length > 1);
-  const trajectorySeries = round.darts
-    .map((dart, index) => ({
-      points: dart.trajectory,
-      label: `Dart ${dart.dartNumber}`,
-      stroke: DART_COLORS[index % DART_COLORS.length],
-      opacity:
-        round.comparison.outlierDart !== null &&
-        dart.dartNumber !== round.comparison.outlierDart
-          ? 0.35
-          : 0.9,
-    }))
-    .filter((series) => series.points.length > 1);
+  const guideSpeed = buildRoundGuideSpeedProfile(round.darts);
+  const guidePath = buildRoundGuideTrajectory(round.darts);
+  const overlayProfiles = [
+    ...round.darts
+      .map((dart, index) => ({
+        points: dart.speedProfile,
+        stroke: DART_COLORS[index % DART_COLORS.length],
+        opacity:
+          round.comparison.outlierDart !== null &&
+          dart.dartNumber !== round.comparison.outlierDart
+            ? 0.35
+            : 0.9,
+      }))
+      .filter((profile) => profile.points.length > 1),
+    ...(guideSpeed.length > 1
+      ? [
+          {
+            points: guideSpeed,
+            stroke: GUIDE_STROKE,
+            opacity: 0.95,
+            dashed: true,
+          },
+        ]
+      : []),
+  ];
+  const trajectorySeries = [
+    ...round.darts
+      .map((dart, index) => ({
+        points: dart.trajectory,
+        label: `Dart ${dart.dartNumber}`,
+        stroke: DART_COLORS[index % DART_COLORS.length],
+        opacity:
+          round.comparison.outlierDart !== null &&
+          dart.dartNumber !== round.comparison.outlierDart
+            ? 0.35
+            : 0.9,
+      }))
+      .filter((series) => series.points.length > 1),
+    ...(guidePath.length > 1
+      ? [
+          {
+            points: guidePath,
+            label: 'Form guide',
+            stroke: GUIDE_STROKE,
+            opacity: 0.95,
+            dashed: true,
+          },
+        ]
+      : []),
+  ];
   const releasePointCount = round.darts.filter(
     (dart) => dart.groups.geometry.releasePoint !== null,
   ).length;
@@ -238,6 +270,10 @@ export function ResultsPage({ round, onThrowAgain, onDone }: ResultsPageProps) {
         {trajectorySeries.length > 0 ? (
           <div className="comparison-visual">
             <h3>Wrist-path signature</h3>
+            <p className="section-copy">
+              Solid lines are your darts. The dashed line is the textbook form
+              guide: a straight delivery and a full finish.
+            </p>
             <TrajectoryPlot
               series={trajectorySeries}
               width={360}
@@ -250,12 +286,20 @@ export function ResultsPage({ round, onThrowAgain, onDone }: ResultsPageProps) {
         {overlayProfiles.length > 0 ? (
           <div className="comparison-visual">
             <h3>Speed signature</h3>
+            <p className="section-copy">
+              Solid lines are your darts. The dashed line is a single smooth
+              acceleration to release.
+            </p>
             <SpeedSparkline
               profiles={overlayProfiles}
               width={360}
               height={100}
               className="results-sparkline"
-              accessibleLabel="Overlaid relative wrist-speed signatures for all three darts."
+              accessibleLabel={
+                guideSpeed.length > 1
+                  ? 'Overlaid relative wrist-speed signatures for this round, with a dashed form-guide curve.'
+                  : 'Overlaid relative wrist-speed signatures for all three darts.'
+              }
             />
           </div>
         ) : null}
@@ -271,6 +315,15 @@ export function ResultsPage({ round, onThrowAgain, onDone }: ResultsPageProps) {
               Dart {dart.dartNumber}
             </span>
           ))}
+          {guideSpeed.length > 1 || guidePath.length > 1 ? (
+            <span
+              className="sparkline-legend__item sparkline-legend__item--guide"
+              style={{ color: GUIDE_STROKE }}
+            >
+              <i aria-hidden="true" />
+              Form guide
+            </span>
+          ) : null}
         </div>
 
         <details className="variability-details">
@@ -304,12 +357,14 @@ export function ResultsPage({ round, onThrowAgain, onDone }: ResultsPageProps) {
         <ThrowCard key={dart.dartNumber} dart={dart} />
       ))}
 
-      <button type="button" className="primary-button" onClick={onThrowAgain}>
-        Throw again
-      </button>
-      <button type="button" className="secondary-button" onClick={onDone}>
-        Done
-      </button>
+      <div className="page-actions">
+        <button type="button" className="primary-button" onClick={onThrowAgain}>
+          Throw again
+        </button>
+        <button type="button" className="secondary-button" onClick={onDone}>
+          Done
+        </button>
+      </div>
       {historyCount > 0 ? (
         <button
           type="button"

@@ -31,5 +31,8 @@ describe('geometry helpers', () => {
     expect(angle).toBeCloseTo(90, 1);
     expect(dist2d({ x: 0, y: 0 }, { x: 3, y: 4 })).toBe(5);
     expect(dist3d({ x: 0, y: 0, z: 0 }, { x: 1, y: 2, z: 2 })).toBe(3);
+    expect(
+      elbowAngle3d({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }),
+    ).toBe(0);
   });
 });

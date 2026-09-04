@@ -64,16 +64,18 @@ export function CapturePage({
 
   if (cameraError) {
     return (
-      <main className="page page--centered">
-        <h1 className="title title--small">Camera permission needed</h1>
-        <p className="body">
-          DartForm needs camera access to capture your throw for pose analysis.
-          Use HTTPS and allow camera access when prompted.
-        </p>
-        <p className="body body--error">{cameraError}</p>
-        <button type="button" className="secondary-button" onClick={onCancel}>
-          Back
-        </button>
+      <main className="page page--centered page--home">
+        <div className="page-inner">
+          <h1 className="title title--small">Camera permission needed</h1>
+          <p className="body">
+            DartForm needs camera access to capture your throw for pose
+            analysis. Use HTTPS and allow camera access when prompted.
+          </p>
+          <p className="body body--error">{cameraError}</p>
+          <button type="button" className="secondary-button" onClick={onCancel}>
+            Back
+          </button>
+        </div>
       </main>
     );
   }
@@ -98,6 +100,26 @@ export function CapturePage({
           mirror={facingMode === 'user'}
         />
       ) : null}
+
+      <div className="capture__rotate" role="dialog" aria-modal="true">
+        <button
+          type="button"
+          className="top-button capture__rotate-cancel"
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
+        <div className="capture__rotate-card">
+          <div className="phone-tilt" aria-hidden="true">
+            <span className="phone-tilt__device" />
+          </div>
+          <h1 className="capture__rotate-title">Turn your phone sideways</h1>
+          <p className="capture__rotate-body">
+            Landscape is required so the camera can see your throwing arm in
+            profile.
+          </p>
+        </div>
+      </div>
 
       <div className="capture__top-bar">
         <button type="button" className="top-button" onClick={onCancel}>
@@ -126,20 +148,48 @@ export function CapturePage({
       ) : null}
 
       <div className="capture__overlay">
-        <p className="overlay-title">
-          Tracking {armLabel} arm · {dartCount} / {dartsPerRound}
-        </p>
-        <p className="status-line" aria-live="polite">
-          {statusMessage}
-        </p>
-        {!armVisible && armTracked && !collectingPostRoll ? (
-          <p className="overlay-hint">Throwing arm detected — hold steady…</p>
-        ) : null}
-        {armVisible ? (
-          <p className="overlay-hint overlay-hint--ready">
-            Teal lines = arm locked in
+        <div className="capture__status">
+          <p className="overlay-title">
+            Tracking {armLabel} arm · {dartCount} / {dartsPerRound}
           </p>
-        ) : null}
+          <p className="status-line" aria-live="polite">
+            {statusMessage}
+          </p>
+          {!armVisible && armTracked && !collectingPostRoll ? (
+            <p className="overlay-hint">Throwing arm detected — hold steady…</p>
+          ) : null}
+          {armVisible ? (
+            <p className="overlay-hint overlay-hint--ready">
+              Teal lines = arm locked in
+            </p>
+          ) : null}
+
+          <button
+            type="button"
+            className="debug-toggle"
+            onClick={() => setShowDebug((value) => !value)}
+          >
+            {showDebug ? 'Hide debug' : 'Show debug'}
+          </button>
+
+          {showDebug ? (
+            <div className="debug-block">
+              <p className="overlay-line">Landmarks: {landmarkCount}</p>
+              <p className="overlay-line">
+                Inference: {inferenceTimeMs.toFixed(1)} ms
+              </p>
+              <p className="overlay-line">
+                Arm visible: {armVisible ? 'yes' : 'no'}
+              </p>
+              <p className="overlay-line">
+                Stable frames: {stableFrameCount} / {stableFramesRequired}
+              </p>
+              <p className="overlay-line">
+                Wrist speed: {wristSpeed.toFixed(2)}
+              </p>
+            </div>
+          ) : null}
+        </div>
 
         {(status === 'dart_recorded' || status === 'round_complete') &&
         lastDart ? (
@@ -148,32 +198,6 @@ export function CapturePage({
               dart={lastDart}
               previousDart={previousDart}
             />
-          </div>
-        ) : null}
-
-        <button
-          type="button"
-          className="debug-toggle"
-          onClick={() => setShowDebug((value) => !value)}
-        >
-          {showDebug ? 'Hide debug' : 'Show debug'}
-        </button>
-
-        {showDebug ? (
-          <div className="debug-block">
-            <p className="overlay-line">Landmarks: {landmarkCount}</p>
-            <p className="overlay-line">
-              Inference: {inferenceTimeMs.toFixed(1)} ms
-            </p>
-            <p className="overlay-line">
-              Arm visible: {armVisible ? 'yes' : 'no'}
-            </p>
-            <p className="overlay-line">
-              Stable frames: {stableFrameCount} / {stableFramesRequired}
-            </p>
-            <p className="overlay-line">
-              Wrist speed: {wristSpeed.toFixed(2)}
-            </p>
           </div>
         ) : null}
       </div>

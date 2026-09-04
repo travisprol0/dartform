@@ -10,7 +10,7 @@ import type { PoseSample } from './detectThrow';
 import { extractThrowTrace } from './detectThrow';
 import { elbowAngle } from './geometry';
 import { computeRoundComparison } from './roundComparison';
-import { analyzeThrowTrace } from './throwPhases';
+import { analyzeThrowTrace, traceHasMeaningfulMotion } from './throwPhases';
 
 export { elbowAngle } from './geometry';
 
@@ -20,7 +20,9 @@ export function computeDartMetrics(
   dartNumber: number,
 ): DartMetrics {
   const trace = extractThrowTrace(buffer, peakIndex);
-  const metrics = analyzeThrowTrace(trace, dartNumber);
+  const metrics = traceHasMeaningfulMotion(trace)
+    ? analyzeThrowTrace(trace, dartNumber)
+    : null;
   if (metrics) {
     return metrics;
   }
@@ -33,6 +35,8 @@ export function computeDartMetrics(
     metricKey: 'captureQuality',
     headline: 'Keep the full arm visible',
     evidence: 'More tracked frames are needed for dependable mechanics.',
+    action:
+      'Step back until your throwing shoulder, elbow, and wrist stay in the camera frame.',
   };
   return {
     dartNumber,
@@ -126,6 +130,7 @@ export function computeDartMetrics(
     },
     trajectory: [],
     insight,
+    insights: [insight],
   };
 }
 

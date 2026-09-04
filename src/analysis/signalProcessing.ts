@@ -227,15 +227,30 @@ export function nearestPeakIndex(
     return Math.max(0, Math.min(candidateIndex, samples.length - 1));
   }
 
-  let peakIndex = candidateIndex;
-  let peakValue = values[candidateIndex] ?? 0;
-  for (let index = 0; index < samples.length; index++) {
+  const firstSearchIndex = samples.length > 2 ? 1 : 0;
+  const lastSearchIndex =
+    samples.length > 2 ? samples.length - 2 : samples.length - 1;
+  let peakIndex = Math.max(
+    firstSearchIndex,
+    Math.min(candidateIndex, lastSearchIndex),
+  );
+  let peakValue = values[peakIndex] ?? 0;
+  for (
+    let index = firstSearchIndex;
+    index <= lastSearchIndex;
+    index++
+  ) {
     if (Math.abs(samples[index].timestamp - candidateTime) > radiusMs) {
       continue;
     }
-    if ((values[index] ?? 0) > peakValue) {
+    const value = values[index] ?? 0;
+    const isHigher = value > peakValue + 1e-9;
+    const isEquallyHighAndCloser =
+      Math.abs(value - peakValue) <= 1e-9 &&
+      Math.abs(index - candidateIndex) < Math.abs(peakIndex - candidateIndex);
+    if (isHigher || isEquallyHighAndCloser) {
       peakIndex = index;
-      peakValue = values[index];
+      peakValue = value;
     }
   }
   return peakIndex;

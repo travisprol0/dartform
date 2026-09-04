@@ -1,4 +1,9 @@
 import type { DartMetrics } from '../types/round';
+import {
+  buildGuideSpeedProfile,
+  buildGuideTrajectory,
+  shouldShowFormGuide,
+} from '../analysis/formGuide';
 import { PhaseTimeline } from './PhaseTimeline';
 import { SpeedSparkline } from './SpeedSparkline';
 import { TrajectoryPlot } from './TrajectoryPlot';
@@ -7,10 +12,7 @@ type ThrowCardProps = {
   dart: DartMetrics;
 };
 
-function formatMs(value: number | null): string {
-  if (value === null) {
-    return '—';
-  }
+function formatMs(value: number): string {
   return `${Math.round(value)} ms`;
 }
 
@@ -42,9 +44,22 @@ function Metric({ label, value }: MetricProps) {
   );
 }
 
+function ChartLegend() {
+  return (
+    <p className="chart-legend" aria-hidden="true">
+      <span className="chart-legend__you">You</span>
+      <span className="chart-legend__guide">Guide</span>
+    </p>
+  );
+}
+
 export function ThrowCard({ dart }: ThrowCardProps) {
   const { groups } = dart;
   const { timing, delivery, geometry, path, body, hand } = groups;
+  const issues = dart.insights.length > 0 ? dart.insights : [dart.insight];
+  const showGuide = shouldShowFormGuide(dart);
+  const guideSpeed = showGuide ? buildGuideSpeedProfile(dart) : [];
+  const guidePath = showGuide ? buildGuideTrajectory(dart) : [];
   const speedMarkers = [
     dart.phaseMarkers.rearMs !== null
       ? { timeMs: dart.phaseMarkers.rearMs, label: 'Backswing end' }
@@ -76,8 +91,22 @@ export function ThrowCard({ dart }: ThrowCardProps) {
             {dart.captureQuality.grade} confidence
           </span>
         </div>
-        <p className="throw-card__insight">{dart.insight.headline}</p>
-        <p className="throw-card__evidence">{dart.insight.evidence}</p>
+        <ol className="throw-issues">
+          {issues.map((issue, index) => (
+            <li
+              key={`${issue.metricKey}-${index}`}
+              className={
+                index === 0
+                  ? 'throw-issues__item throw-issues__item--primary'
+                  : 'throw-issues__item'
+              }
+            >
+              <p className="throw-card__insight">{issue.headline}</p>
+              <p className="throw-card__evidence">{issue.evidence}</p>
+              <p className="throw-card__action">{issue.action}</p>
+            </li>
+          ))}
+        </ol>
         <div className="throw-card__hero">
           <div>
             <p className="throw-card__label">Elbow at speed peak</p>
@@ -101,13 +130,35 @@ export function ThrowCard({ dart }: ThrowCardProps) {
         <div className="throw-card__sparkline">
           <SpeedSparkline
             profile={dart.speedProfile}
+            profiles={
+              guideSpeed.length > 1
+                ? [
+                    {
+                      points: dart.speedProfile,
+                      stroke: '#5eead4',
+                    },
+                    {
+                      points: guideSpeed,
+                      stroke: '#94a3b8',
+                      opacity: 0.85,
+                      dashed: true,
+                    },
+                  ]
+                : undefined
+            }
             width={320}
             height={72}
             markers={speedMarkers}
-            accessibleLabel={`Dart ${dart.dartNumber} relative wrist-speed curve with backswing, speed-peak, and settle markers.`}
+            accessibleLabel={
+              guideSpeed.length > 1
+                ? `Dart ${dart.dartNumber} relative wrist-speed curve with a dashed single-peak form guide, plus backswing, speed-peak, and settle markers.`
+                : `Dart ${dart.dartNumber} relative wrist-speed curve with backswing, speed-peak, and settle markers.`
+            }
           />
+          {guideSpeed.length > 1 ? <ChartLegend /> : null}
           <p className="throw-card__sparkline-label">
             Relative wrist speed; dashed lines mark phases
+            {guideSpeed.length > 1 ? '; dashed curve is the form guide' : ''}
           </p>
         </div>
       ) : null}
@@ -144,11 +195,23 @@ export function ThrowCard({ dart }: ThrowCardProps) {
                 label: `Dart ${dart.dartNumber}`,
                 stroke: '#5eead4',
               },
+              ...(guidePath.length > 1
+                ? [
+                    {
+                      points: guidePath,
+                      label: 'Form guide',
+                      stroke: '#94a3b8',
+                      opacity: 0.85,
+                      dashed: true,
+                    },
+                  ]
+                : []),
             ]}
             width={320}
             height={128}
             className="trajectory-plot"
           />
+          {guidePath.length > 1 ? <ChartLegend /> : null}
         </div>
       ) : null}
 

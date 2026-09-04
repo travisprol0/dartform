@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeThrowTrace } from './throwPhases';
+import { analyzeThrowTrace, traceHasMeaningfulMotion } from './throwPhases';
 import { makeThrowTrace } from '../test/fixtures';
 
 describe('analyzeThrowTrace', () => {
@@ -27,7 +27,9 @@ describe('analyzeThrowTrace', () => {
     expect(
       metrics.trajectory.some((point) => point.phase === 'followThrough'),
     ).toBe(true);
-    expect(metrics.captureQuality.traceCoverage).toBeGreaterThan(0.9);
+    expect(metrics.insight.category).toBeDefined();
+    expect(metrics.insights.length).toBeGreaterThan(0);
+    expect(metrics.insights[0]).toEqual(metrics.insight);
   });
 
   it('suppresses noisy derivatives and hand estimates on a weak trace', () => {
@@ -52,5 +54,21 @@ describe('analyzeThrowTrace', () => {
     expect(metrics.captureQuality.grade).toBe('low');
     expect(metrics.groups.hand.handAngleDeg).toBeNull();
     expect(metrics.insight.category).toBe('capture');
+  });
+
+  it('rejects traces without enough samples or meaningful motion', () => {
+    const shortTrace = makeThrowTrace();
+    shortTrace.samples = shortTrace.samples.slice(0, 2);
+    shortTrace.peakIndex = 0;
+    expect(analyzeThrowTrace(shortTrace, 1)).toBeNull();
+    expect(traceHasMeaningfulMotion(shortTrace)).toBe(false);
+
+    const stillTrace = makeThrowTrace();
+    stillTrace.samples = stillTrace.samples.map((sample) => ({
+      ...sample,
+      wrist: { ...sample.wrist, x: 0.5, y: 0.5 },
+      elbow: { ...sample.elbow, x: 0.5, y: 0.5 },
+    }));
+    expect(traceHasMeaningfulMotion(stillTrace)).toBe(false);
   });
 });

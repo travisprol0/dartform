@@ -239,6 +239,12 @@ export function usePoseCamera({
             ...capturedMetrics,
             insight: personalizedInsight,
             coachingTip: `${personalizedInsight.headline}. ${personalizedInsight.evidence}`,
+            insights: [
+              personalizedInsight,
+              ...capturedMetrics.insights.filter(
+                (item) => item.metricKey !== 'repeatMotion',
+              ),
+            ],
           }
         : capturedMetrics;
       dartMetricsRef.current.push(metrics);
@@ -304,7 +310,7 @@ export function usePoseCamera({
       setDetectorArmed(detector.isArmed());
       lostFrameCountRef.current += 1;
       if (
-        lostFrameCountRef.current >= ARM_LOST_FRAMES_BEFORE_RESET
+        lostFrameCountRef.current === ARM_LOST_FRAMES_BEFORE_RESET
       ) {
         stableFrameCountRef.current = 0;
         if (!roundInProgress && !collecting) {
@@ -312,6 +318,10 @@ export function usePoseCamera({
           detector.reset();
           setDetectorArmed(true);
         }
+      } else if (
+        lostFrameCountRef.current > ARM_LOST_FRAMES_BEFORE_RESET
+      ) {
+        stableFrameCountRef.current = 0;
       }
       setStableFrameCount(stableFrameCountRef.current);
       setArmVisible(false);
@@ -422,7 +432,8 @@ export function usePoseCamera({
       const detector = throwDetectorRef.current;
       const hasPreRoll =
         detector.getRecentContinuousDurationMs() >= MIN_READY_BUFFER_MS;
-      const canDetectThrow = isArmStable && hasPreRoll;
+      const canDetectThrow =
+        isArmStable && (hasPreRoll || detector.isPrimed());
       const throwEvent = detector.addSample(sample, canDetectThrow);
       const collecting = detector.isCollectingPostRoll();
       const armed = detector.isArmed();
@@ -430,7 +441,8 @@ export function usePoseCamera({
       setDetectorArmed(armed);
       const isReady =
         isArmStable &&
-        detector.getRecentContinuousDurationMs() >= MIN_READY_BUFFER_MS &&
+        (detector.getRecentContinuousDurationMs() >= MIN_READY_BUFFER_MS ||
+          detector.isPrimed()) &&
         armed &&
         !collecting;
       setArmVisible(isReady);

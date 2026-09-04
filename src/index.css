@@ -35,13 +35,31 @@ button {
 .page {
   min-height: 100dvh;
   background: #0f172a;
-  padding: 24px;
+  padding: max(24px, env(safe-area-inset-top))
+    max(24px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom))
+    max(24px, env(safe-area-inset-left));
 }
 
 .page--centered {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  align-items: center;
+}
+
+.page-inner {
+  width: 100%;
+  max-width: 26.5rem;
+}
+
+.page--home .title,
+.page--home .subtitle {
+  text-wrap: pretty;
+}
+
+.page--home .body {
+  text-align: left;
 }
 
 .page--scroll {
@@ -102,6 +120,7 @@ button {
 
 .toggle-button {
   flex: 1;
+  min-height: 48px;
   padding: 14px;
   border: 1px solid #334155;
   border-radius: 10px;
@@ -137,12 +156,33 @@ button {
   line-height: 1.47;
 }
 
+.setup-body--note {
+  margin-top: 10px;
+  color: #5eead4;
+  font-weight: 600;
+}
+
+.setup-body--desktop {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .setup-body--phone {
+    display: none;
+  }
+
+  .setup-body--desktop {
+    display: block;
+  }
+}
+
 .page--scroll .primary-button {
   margin-top: 16px;
 }
 
 .primary-button {
   width: 100%;
+  min-height: 48px;
   padding: 16px;
   border: none;
   border-radius: 12px;
@@ -154,6 +194,7 @@ button {
 
 .secondary-button {
   width: 100%;
+  min-height: 48px;
   margin-top: 8px;
   padding: 14px;
   border: none;
@@ -162,6 +203,18 @@ button {
   color: #94a3b8;
   font-size: 1rem;
   font-weight: 600;
+}
+
+.page-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.page-actions .primary-button,
+.page-actions .secondary-button {
+  margin-top: 0;
 }
 
 .summary-card {
@@ -364,7 +417,9 @@ button {
 }
 
 .capture__throw-card {
-  margin: 12px 0 8px;
+  flex: 1 1 16rem;
+  min-width: 0;
+  margin: 0;
 }
 
 .capture {
@@ -393,15 +448,17 @@ button {
 
 .capture__top-bar {
   position: absolute;
-  top: 8px;
-  right: 16px;
-  left: 16px;
+  top: calc(8px + env(safe-area-inset-top));
+  right: calc(16px + env(safe-area-inset-right));
+  left: calc(16px + env(safe-area-inset-left));
   z-index: 2;
   display: flex;
   justify-content: space-between;
+  gap: 12px;
 }
 
 .top-button {
+  min-height: 40px;
   padding: 8px 14px;
   border: none;
   border-radius: 8px;
@@ -446,12 +503,27 @@ button {
 
 .capture__overlay {
   position: absolute;
-  right: 16px;
+  right: calc(16px + env(safe-area-inset-right));
   bottom: 32px;
-  left: 16px;
+  left: calc(16px + env(safe-area-inset-left));
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 16px;
+  max-width: 28rem;
   padding: 16px;
   border-radius: 12px;
   background: rgba(15, 23, 42, 0.78);
+}
+
+.capture__status {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.capture__rotate {
+  display: none;
 }
 
 .overlay-title {
@@ -802,6 +874,13 @@ button {
   background: currentColor;
 }
 
+.sparkline-legend__item--guide i {
+  height: 0;
+  border-top: 2px dashed currentColor;
+  background: none;
+  border-radius: 0;
+}
+
 .variability-details,
 .mechanics-details {
   margin-top: 16px;
@@ -836,10 +915,61 @@ button {
   font-weight: 700;
 }
 
+.throw-issues {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.throw-issues__item + .throw-issues__item {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #334155;
+}
+
+.throw-issues__item .throw-card__insight {
+  margin: 0;
+}
+
 .throw-card__evidence {
-  margin: 2px 0 12px;
+  margin: 2px 0 0;
   color: #cbd5e1;
   font-size: 0.8125rem;
+}
+
+.throw-card__action {
+  margin: 4px 0 0;
+  color: #f8fafc;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.chart-legend {
+  display: flex;
+  gap: 14px;
+  margin: 6px 0 0;
+  color: #94a3b8;
+  font-size: 0.6875rem;
+}
+
+.chart-legend__you,
+.chart-legend__guide {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-legend__you::before,
+.chart-legend__guide::before {
+  content: '';
+  width: 16px;
+  height: 0;
+  border-top: 2px solid #5eead4;
+}
+
+.chart-legend__guide::before {
+  border-top-color: #94a3b8;
+  border-top-style: dashed;
 }
 
 .throw-card__hero {
@@ -955,9 +1085,21 @@ button {
   font-size: 0.75rem;
 }
 
+.instant-feedback__action {
+  margin: 6px 0 0;
+  color: #f8fafc;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.instant-feedback__more {
+  margin: 4px 0 0;
+  color: #94a3b8;
+  font-size: 0.75rem;
+}
+
 .capture__overlay {
-  bottom: calc(20px + env(safe-area-inset-bottom));
-  z-index: 2;
+  bottom: calc(16px + env(safe-area-inset-bottom));
 }
 
 .history-clear-button {
@@ -981,9 +1123,65 @@ summary:focus-visible {
   outline-offset: 3px;
 }
 
+.phone-tilt {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+}
+
+.phone-tilt__device {
+  display: block;
+  width: 28px;
+  height: 48px;
+  border: 3px solid #5eead4;
+  border-radius: 7px;
+  transform-origin: center;
+  animation: tilt-phone 1.8s ease-in-out infinite;
+}
+
+@keyframes tilt-phone {
+  0%,
+  18% {
+    transform: rotate(0deg);
+  }
+  45%,
+  100% {
+    transform: rotate(90deg);
+  }
+}
+
+.capture__rotate-card {
+  max-width: 22rem;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.capture__rotate-title {
+  margin: 16px 0 8px;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.capture__rotate-body {
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.capture__rotate-cancel {
+  position: absolute;
+  top: calc(8px + env(safe-area-inset-top));
+  left: calc(16px + env(safe-area-inset-left));
+}
+
 @media (max-width: 480px) {
   .page {
-    padding: 18px;
+    padding: max(18px, env(safe-area-inset-top))
+      max(18px, env(safe-area-inset-right))
+      max(18px, env(safe-area-inset-bottom))
+      max(18px, env(safe-area-inset-left));
   }
 
   .summary-metrics {
@@ -1004,14 +1202,124 @@ summary:focus-visible {
   }
 
   .capture__overlay {
-    right: 10px;
-    left: 10px;
+    right: calc(10px + env(safe-area-inset-right));
+    left: calc(10px + env(safe-area-inset-left));
     padding: 12px;
   }
 
-  .capture__overlay:has(.instant-feedback) > .overlay-hint,
-  .capture__overlay:has(.instant-feedback) > .debug-toggle,
-  .capture__overlay:has(.instant-feedback) > .debug-block {
+  .capture__overlay:has(.instant-feedback) .overlay-hint,
+  .capture__overlay:has(.instant-feedback) .debug-toggle,
+  .capture__overlay:has(.instant-feedback) .debug-block {
+    display: none;
+  }
+}
+
+@media (min-width: 720px) {
+  .page--home .page-inner {
+    padding: 32px;
+    border: 1px solid #334155;
+    border-radius: 20px;
+    background: #1e293b;
+  }
+
+  .page--home .setup-box {
+    background: #0f172a;
+  }
+
+  .page--scroll {
+    max-width: 52rem;
+    padding-top: 40px;
+  }
+
+  .page-actions {
+    flex-direction: row;
+  }
+
+  .page-actions .primary-button,
+  .page-actions .secondary-button {
+    width: auto;
+    flex: 1;
+  }
+
+  .comparison-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .capture__overlay {
+    right: auto;
+    width: min(28rem, calc(100% - 48px));
+    left: calc(24px + env(safe-area-inset-left));
+  }
+}
+
+@media (orientation: landscape) and (max-height: 560px) {
+  .capture__top-bar {
+    top: calc(6px + env(safe-area-inset-top));
+    right: calc(12px + env(safe-area-inset-right));
+    left: calc(12px + env(safe-area-inset-left));
+  }
+
+  .capture__overlay {
+    right: calc(12px + env(safe-area-inset-right));
+    left: calc(12px + env(safe-area-inset-left));
+    width: auto;
+    max-width: none;
+    padding: 10px 12px;
+  }
+
+  .overlay-title {
+    margin-bottom: 2px;
+    font-size: 0.8125rem;
+  }
+
+  .status-line {
+    margin-bottom: 4px;
+    font-size: 1rem;
+  }
+
+  .capture__throw-card {
+    flex: 1 1 16rem;
+    margin: 0;
+    max-height: calc(100dvh - 72px);
+    overflow: auto;
+  }
+
+  .instant-feedback {
+    padding: 10px;
+  }
+
+  .instant-feedback__headline {
+    margin-top: 4px;
+    font-size: 1rem;
+  }
+
+  .instant-feedback__evidence {
+    display: none;
+  }
+
+  .capture__overlay:has(.instant-feedback) .overlay-hint,
+  .capture__overlay:has(.instant-feedback) .debug-toggle,
+  .capture__overlay:has(.instant-feedback) .debug-block {
+    display: none;
+  }
+}
+
+@media (orientation: portrait) and (pointer: coarse) {
+  .capture__rotate {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.92);
+    color: #f8fafc;
+  }
+
+  .capture__top-bar,
+  .capture__overlay,
+  .capture__loading {
     display: none;
   }
 }

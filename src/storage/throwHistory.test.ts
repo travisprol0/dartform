@@ -112,4 +112,17 @@ describe('throw history baseline', () => {
       ),
     ).toBeNull();
   });
+
+  it('ignores history when browser storage is unavailable', () => {
+    vi.stubGlobal('window', undefined);
+    expect(storedThrowCount()).toBe(0);
+    clearThrowHistory();
+    expect(
+      compareWithPersonalBaseline(
+        'right',
+        'environment',
+        [makeAnalyzedDart(1), makeAnalyzedDart(2), makeAnalyzedDart(3)],
+      ),
+    ).toBeNull();
+  });
 });

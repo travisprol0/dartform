@@ -15,23 +15,38 @@ function candidate(
   metricKey: string,
   headline: string,
   evidence: string,
+  action: string,
 ): CandidateInsight {
-  return { priority, category, metricKey, headline, evidence };
+  return { priority, category, metricKey, headline, evidence, action };
 }
 
-export function buildCoachingInsight(
+const CLEAN_MOTION: CoachingInsight = {
+  category: 'delivery',
+  metricKey: 'repeatMotion',
+  headline: 'Clean motion captured',
+  evidence: 'Acceleration and finish stayed inside the current guide bands.',
+  action: 'Keep repeating this rhythm on the next dart.',
+};
+
+function captureInsight(quality: CaptureQuality): CoachingInsight {
+  return {
+    category: 'capture',
+    metricKey: 'captureQuality',
+    headline: 'Keep the full arm visible',
+    evidence:
+      quality.reasons[0] ??
+      'More tracked frames are needed for dependable mechanics.',
+    action:
+      'Step back until your throwing shoulder, elbow, and wrist stay in the camera frame.',
+  };
+}
+
+export function collectCoachingInsights(
   groups: ThrowMetricGroups,
   quality: CaptureQuality,
-): CoachingInsight {
+): CoachingInsight[] {
   if (quality.grade === 'low') {
-    return {
-      category: 'capture',
-      metricKey: 'captureQuality',
-      headline: 'Keep the full arm visible',
-      evidence:
-        quality.reasons[0] ??
-        'More tracked frames are needed for dependable mechanics.',
-    };
+    return [captureInsight(quality)];
   }
 
   const candidates: CandidateInsight[] = [];
@@ -45,6 +60,7 @@ export function buildCoachingInsight(
         'aimHoldMs',
         'Give the aim one more beat',
         `The quiet hold lasted ${Math.round(timing.aimHoldMs)} ms.`,
+        'Pause on the target until the picture feels still, then start the backswing.',
       ),
     );
   }
@@ -56,6 +72,7 @@ export function buildCoachingInsight(
         'backswingMs',
         'Let the backswing load',
         `The backswing took ${Math.round(timing.backswingMs)} ms.`,
+        'Take the dart back until you feel a loaded stop before going forward.',
       ),
     );
   }
@@ -70,6 +87,7 @@ export function buildCoachingInsight(
         'elbowExtensionDeg',
         'Extend through the release point',
         `Elbow extension was ${geometry.elbowExtensionDeg.toFixed(0)}°.`,
+        'Keep accelerating through the release instead of stopping at the dart.',
       ),
     );
   }
@@ -84,6 +102,7 @@ export function buildCoachingInsight(
         'followThroughLength',
         'Let the arm finish',
         `Follow-through covered ${path.followThroughLength.toFixed(2)} forearms.`,
+        'Let the hand continue toward the board after the dart leaves.',
       ),
     );
   }
@@ -98,6 +117,7 @@ export function buildCoachingInsight(
         'followThroughContinuation',
         'Continue along the delivery line',
         `Finish direction held ${Math.round(path.followThroughContinuation * 100)}% of the release path.`,
+        'Finish along the same line you threw on, not down or across the body.',
       ),
     );
   }
@@ -112,6 +132,7 @@ export function buildCoachingInsight(
         'hitchCount',
         'Build speed in one motion',
         `${delivery.hitchCount} speed peaks appeared before release.`,
+        'Use one continuous acceleration—no pause or second push.',
       ),
     );
   } else if (
@@ -125,6 +146,7 @@ export function buildCoachingInsight(
         'smoothness',
         'Smooth the acceleration',
         `Speed variation measured ${delivery.smoothness.toFixed(2)}.`,
+        'Use one continuous acceleration—no pause or second push.',
       ),
     );
   }
@@ -136,25 +158,28 @@ export function buildCoachingInsight(
         'shoulderDrift',
         'Keep the throwing shoulder quiet',
         `Shoulder travel was ${body.shoulderDrift.toFixed(2)} forearms.`,
+        'Plant the throwing shoulder and let only the forearm move.',
       ),
     );
   }
 
   candidates.sort((left, right) => right.priority - left.priority);
-  const top = candidates[0];
-  if (top) {
-    return {
-      category: top.category,
-      metricKey: top.metricKey,
-      headline: top.headline,
-      evidence: top.evidence,
-    };
+  if (candidates.length === 0) {
+    return [CLEAN_MOTION];
   }
 
-  return {
-    category: 'delivery',
-    metricKey: 'repeatMotion',
-    headline: 'Clean motion captured',
-    evidence: 'Acceleration and finish stayed inside the current guide bands.',
-  };
+  return candidates.map((item) => ({
+    category: item.category,
+    metricKey: item.metricKey,
+    headline: item.headline,
+    evidence: item.evidence,
+    action: item.action,
+  }));
+}
+
+export function buildCoachingInsight(
+  groups: ThrowMetricGroups,
+  quality: CaptureQuality,
+): CoachingInsight {
+  return collectCoachingInsights(groups, quality)[0];
 }

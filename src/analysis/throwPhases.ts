@@ -7,7 +7,7 @@ import type {
   TrajectoryPoint,
 } from '../types/round';
 import { computeCaptureQuality } from './captureQuality';
-import { buildCoachingInsight } from './coaching';
+import { collectCoachingInsights } from './coaching';
 import type { PoseSample, ThrowTrace } from './detectThrow';
 import {
   dist2d,
@@ -26,6 +26,7 @@ const MOTION_SPEED_THRESHOLD = 0.35;
 const QUIET_SPEED_RATIO = 0.15;
 const SETTLE_SPEED_RATIO = 0.25;
 const MIN_PHASE_SAMPLES = 3;
+const MOTION_BREAK_FRAMES = 5;
 
 function dist(
   a: { x: number; y: number },
@@ -85,17 +86,23 @@ function elbowAt(sample: PoseSample, useWorld: boolean): number {
 }
 
 function findMotionStart(speeds: number[], peakIndex: number): number {
-  for (let i = peakIndex; i >= 1; i--) {
-    if (speeds[i] >= MOTION_SPEED_THRESHOLD && speeds[i - 1] < MOTION_SPEED_THRESHOLD) {
-      return i;
+  let start = Math.max(0, Math.min(peakIndex, speeds.length - 1));
+  let foundMotion = false;
+  let quietFrames = 0;
+
+  for (let index = start; index >= 0; index--) {
+    if (speeds[index] >= MOTION_SPEED_THRESHOLD) {
+      foundMotion = true;
+      start = index;
+      quietFrames = 0;
+    } else if (foundMotion) {
+      quietFrames += 1;
+      if (quietFrames >= MOTION_BREAK_FRAMES) {
+        return start;
+      }
     }
   }
-  for (let i = 0; i <= peakIndex; i++) {
-    if (speeds[i] >= MOTION_SPEED_THRESHOLD) {
-      return i;
-    }
-  }
-  return 0;
+  return foundMotion ? start : 0;
 }
 
 function findAimStart(speeds: number[], motionStart: number): number {
@@ -473,6 +480,17 @@ function buildTrajectory(
   return trajectory;
 }
 
+export function traceHasMeaningfulMotion(trace: ThrowTrace): boolean {
+  if (trace.samples.length < MIN_PHASE_SAMPLES || trace.peakIndex < 1) {
+    return false;
+  }
+  const speeds = imageSpeeds(trace);
+  if (speeds.length === 0) {
+    return false;
+  }
+  return Math.max(...speeds) >= MOTION_SPEED_THRESHOLD;
+}
+
 export function analyzeThrowTrace(
   trace: ThrowTrace,
   dartNumber: number,
@@ -482,6 +500,7 @@ export function analyzeThrowTrace(
   }
 
   const captureQuality = computeCaptureQuality(trace);
+
   const smoothedTrace: ThrowTrace = {
     samples: smoothPoseSamples(trace.samples),
     peakIndex: trace.peakIndex,
@@ -750,7 +769,8 @@ export function analyzeThrowTrace(
     },
   };
 
-  const insight = buildCoachingInsight(groups, captureQuality);
+  const insights = collectCoachingInsights(groups, captureQuality);
+  const insight = insights[0];
   const speedProfile: SpeedPoint[] = analyzedTrace.samples.map(
     (sample, index) => ({
       timeMs: sample.timestamp - motionStartTime,
@@ -787,5 +807,6 @@ export function analyzeThrowTrace(
       forearm,
     ),
     insight,
+    insights,
   };
 }
