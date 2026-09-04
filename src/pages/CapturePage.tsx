@@ -188,7 +188,7 @@ export function CapturePage({
                 Stable frames: {stableFrameCount} / {stableFramesRequired}
               </p>
               <p className="overlay-line">
-                Wrist speed: {wristSpeed.toFixed(2)}
+                Wrist speed: {wristSpeed.toFixed(2)} m/s
               </p>
             </div>
           ) : null}

@@ -4,7 +4,8 @@ import {
   ThrowDetector,
   type PoseSample,
 } from '../analysis/detectThrow';
-import { poseSample } from './fixtures';
+import { poseSample, withoutWorld } from './fixtures';
+import type { PoseLandmark } from '../analysis/throwingArm';
 
 export const FRAME_MS = 1000 / 30;
 
@@ -43,9 +44,9 @@ export function acceptedThrowBuffer(peakTimestamp = 10_000): {
   pendingPeak: {
     speed: number;
     timestamp: number;
-    wrist: { x: number; y: number };
+    wrist: { x: number; y: number; z: number };
   };
-  throwBaselineWrist: { x: number; y: number };
+  throwBaselineWrist: { x: number; y: number; z: number };
   throwBaselineElbowAngle: number;
 } {
   const aim = poseAtForearmAngle(peakTimestamp - 400, AIM_FOREARM_DEG);
@@ -56,9 +57,17 @@ export function acceptedThrowBuffer(peakTimestamp = 10_000): {
     pendingPeak: {
       speed: 2.5,
       timestamp: peakTimestamp,
-      wrist: { x: release.wrist.x, y: release.wrist.y },
+      wrist: {
+        x: release.world?.wrist.x ?? release.wrist.x,
+        y: release.world?.wrist.y ?? release.wrist.y,
+        z: release.world?.wrist.z ?? 0,
+      },
     },
-    throwBaselineWrist: { x: aim.wrist.x, y: aim.wrist.y },
+    throwBaselineWrist: {
+      x: aim.world?.wrist.x ?? aim.wrist.x,
+      y: aim.world?.wrist.y ?? aim.wrist.y,
+      z: aim.world?.wrist.z ?? 0,
+    },
     throwBaselineElbowAngle: sampleElbowAngle(aim),
   };
 }
@@ -187,6 +196,124 @@ export function validThrowWithLookback(
 ): number {
   timestamp = longPrime(detector, timestamp);
   return acceleratingThrow(detector, timestamp);
+}
+
+function landmark(
+  x: number,
+  y: number,
+  z = 0,
+): PoseLandmark {
+  return { x, y, z, visibility: 0.95, presence: 0.95 };
+}
+
+export function worldSwingSample(
+  timestamp: number,
+  angleDeg: number,
+): PoseSample {
+  const sample = poseSample(timestamp, 0.5, 0.5);
+  const elbow = { x: 0, y: 0.25, z: 0 };
+  const radians = (angleDeg * Math.PI) / 180;
+  const wrist = {
+    x: elbow.x,
+    y: elbow.y + Math.sin(radians) * 0.25,
+    z: elbow.z + Math.cos(radians) * 0.25,
+  };
+  return {
+    ...sample,
+    world: {
+      ...sample.world!,
+      shoulder: landmark(0, 0, 0),
+      elbow: landmark(elbow.x, elbow.y, elbow.z),
+      wrist: landmark(wrist.x, wrist.y, wrist.z),
+    },
+  };
+}
+
+export function worldDriftSample(
+  timestamp: number,
+  extraDepth: number,
+): PoseSample {
+  const sample = poseAtForearmAngle(timestamp, AIM_FOREARM_DEG);
+  return {
+    ...sample,
+    world: {
+      ...sample.world!,
+      wrist: landmark(
+        sample.world!.wrist.x,
+        sample.world!.wrist.y,
+        sample.world!.wrist.z + extraDepth,
+      ),
+    },
+  };
+}
+
+export function imageOnlyAcceleratingThrow(
+  detector: ThrowDetector,
+  timestamp: number,
+): number {
+  for (let frame = 1; frame <= 4; frame++) {
+    const progress = frame / 4;
+    const angle =
+      AIM_FOREARM_DEG + (COCK_FOREARM_DEG - AIM_FOREARM_DEG) * progress;
+    const wrist = forearmWrist(angle);
+    detector.addSample(
+      withoutWorld(poseSample(timestamp, wrist.x, wrist.y, 0, 0.5, 0.5)),
+    );
+    timestamp += FRAME_MS;
+  }
+  for (let frame = 1; frame <= 8; frame++) {
+    const progress = frame / 8;
+    const angle =
+      COCK_FOREARM_DEG +
+      (RELEASE_FOREARM_DEG - COCK_FOREARM_DEG) * progress;
+    const wrist = forearmWrist(angle);
+    detector.addSample(
+      withoutWorld(poseSample(timestamp, wrist.x, wrist.y, 0, 0.5, 0.5)),
+    );
+    timestamp += FRAME_MS;
+  }
+  for (let frame = 0; frame < 10; frame++) {
+    detector.addSample(
+      withoutWorld(
+        poseSample(
+          timestamp,
+          THROW_PEAK_WRIST.x,
+          THROW_PEAK_WRIST.y,
+          0,
+          0.5,
+          0.5,
+        ),
+      ),
+    );
+    timestamp += FRAME_MS;
+  }
+  return timestamp;
+}
+
+export function facingCameraThrow(
+  detector: ThrowDetector,
+  timestamp: number,
+): number {
+  for (let frame = 1; frame <= 4; frame++) {
+    const progress = frame / 4;
+    const angle =
+      AIM_FOREARM_DEG + (COCK_FOREARM_DEG - AIM_FOREARM_DEG) * progress;
+    detector.addSample(worldSwingSample(timestamp, angle));
+    timestamp += FRAME_MS;
+  }
+  for (let frame = 1; frame <= 8; frame++) {
+    const progress = frame / 8;
+    const angle =
+      COCK_FOREARM_DEG +
+      (RELEASE_FOREARM_DEG - COCK_FOREARM_DEG) * progress;
+    detector.addSample(worldSwingSample(timestamp, angle));
+    timestamp += FRAME_MS;
+  }
+  for (let frame = 0; frame < 10; frame++) {
+    detector.addSample(worldSwingSample(timestamp, RELEASE_FOREARM_DEG));
+    timestamp += FRAME_MS;
+  }
+  return timestamp;
 }
 
 export function floodBufferBeforeFinalize(

@@ -13,10 +13,12 @@ import {
   resolveThrowPeakIndex,
   sampleAtOrBefore,
   sampleElbowAngle,
+  wristSpeedMeters,
+  wristTravelMeters,
   type PendingThrow,
   type ThrowEvent,
 } from './detectThrow';
-import { poseSample } from '../test/fixtures';
+import { poseSample, withoutWorld } from '../test/fixtures';
 import {
   FRAME_MS,
   THROW_PEAK_WRIST,
@@ -24,12 +26,17 @@ import {
   acceleratingThrow,
   decelerateToRest,
   degenerateElbowSample,
+  facingCameraThrow,
   floodBufferBeforeFinalize,
+  imageOnlyAcceleratingThrow,
+  forearmWrist,
   longPrime,
   poseAtForearmAngle,
   shortPrime,
   tinyDisplacementThrow,
   validThrowWithLookback,
+  worldDriftSample,
+  worldSwingSample,
 } from '../test/detectThrowFixtures';
 
 function settleAt(
@@ -84,6 +91,39 @@ function emitThrow(
 describe('sampleElbowAngle', () => {
   it('returns 0 for degenerate arm geometry', () => {
     expect(sampleElbowAngle(degenerateElbowSample(10_000))).toBe(0);
+    expect(sampleElbowAngle(withoutWorld(degenerateElbowSample(10_000)))).toBe(
+      0,
+    );
+  });
+});
+
+describe('wristSpeedMeters', () => {
+  it('uses world travel in meters per second', () => {
+    const start = worldSwingSample(10_000, 0);
+    const next = worldSwingSample(10_100, 45);
+    expect(wristSpeedMeters(start, next)).toBeGreaterThan(0.8);
+  });
+
+  it('returns 0 for a non-positive timestamp delta', () => {
+    const sample = poseSample(10_000, 0.5, 0.35);
+    expect(wristSpeedMeters(sample, sample)).toBe(0);
+  });
+
+  it('scales 2D image speed into meters when world joints are missing', () => {
+    const start = withoutWorld(poseSample(10_000, 0.5, 0.5, 0, 0.5, 0.5));
+    const next = withoutWorld(poseSample(10_100, 0.7, 0.5, 0, 0.5, 0.5));
+    expect(wristSpeedMeters(start, next)).toBeGreaterThan(0.4);
+  });
+});
+
+describe('wristTravelMeters', () => {
+  it('prefers world displacement and falls back to scaled image travel', () => {
+    const aim = poseAtForearmAngle(10_000, 25);
+    const release = poseAtForearmAngle(10_200, 60);
+    expect(wristTravelMeters(aim, release)).toBeGreaterThan(0.08);
+    expect(
+      wristTravelMeters(withoutWorld(aim), withoutWorld(release)),
+    ).toBeGreaterThan(0.08);
   });
 });
 
@@ -170,16 +210,6 @@ describe('evaluateThrowCandidate', () => {
     expect(
       evaluateThrowCandidate({
         peakSpeed: 2.5,
-        displacement: 0.04,
-        elbowExtension: 20,
-        worldDisplacement: 0.2,
-        backswingFlexion: 20,
-        forearmNormalizedSpeed: 15,
-      }),
-    ).toBeNull();
-    expect(
-      evaluateThrowCandidate({
-        peakSpeed: 2.5,
         displacement: 0.2,
         elbowExtension: -25,
       }),
@@ -196,13 +226,18 @@ describe('evaluateThrowCandidate', () => {
         peakSpeed: 2.5,
         displacement: 0.2,
         elbowExtension: 20,
-        wristDx: 0.05,
-        wristDy: -0.2,
       }),
     ).toBe('no_throw_shape');
     expect(
       evaluateThrowCandidate({
-        peakSpeed: 0.57,
+        peakSpeed: 1.2,
+        displacement: 0.2,
+        elbowExtension: 20,
+      }),
+    ).toBe('peak_speed');
+    expect(
+      evaluateThrowCandidate({
+        peakSpeed: 0.5,
         displacement: 0.2,
         elbowExtension: 20,
         backswingFlexion: 20,
@@ -211,11 +246,11 @@ describe('evaluateThrowCandidate', () => {
     ).toBe('peak_speed');
     expect(
       evaluateThrowCandidate({
-        peakSpeed: 2.5,
-        displacement: 0.2,
+        peakSpeed: 1,
+        displacement: 0.12,
         elbowExtension: 20,
         backswingFlexion: 20,
-        forearmNormalizedSpeed: 15,
+        forearmNormalizedSpeed: 4,
       }),
     ).toBeNull();
   });
@@ -225,7 +260,7 @@ describe('evaluateDecelerationThrow', () => {
   const pendingPeak = {
     speed: 2.5,
     timestamp: 10_000,
-    wrist: { x: 0.9, y: 0.35 },
+    wrist: { x: 0.9, y: 0.35, z: 0 },
   };
 
   it('returns missing_peak when the buffer is empty', () => {
@@ -233,7 +268,7 @@ describe('evaluateDecelerationThrow', () => {
       evaluateDecelerationThrow({
         buffer: [],
         pendingPeak,
-        throwBaselineWrist: { x: 0.5, y: 0.35 },
+        throwBaselineWrist: { x: 0.5, y: 0.35, z: 0 },
         throwBaselineElbowAngle: 90,
       }),
     ).toEqual({ type: 'missing_peak' });
@@ -254,7 +289,7 @@ describe('evaluateDecelerationThrow', () => {
         pendingPeak: {
           speed: 2.5,
           timestamp: peakTimestamp,
-          wrist: { x: release.wrist.x, y: release.wrist.y },
+          wrist: { x: release.wrist.x, y: release.wrist.y, z: 0 },
         },
         throwBaselineWrist: null,
         throwBaselineElbowAngle: null,
@@ -298,7 +333,7 @@ describe('evaluateDecelerationThrow', () => {
       evaluateDecelerationThrow({
         buffer: [baseline, peak],
         pendingPeak: { ...pendingPeak, speed: 0.34 },
-        throwBaselineWrist: { x: 0.5, y: 0.35 },
+        throwBaselineWrist: { x: 0.5, y: 0.35, z: 0 },
         throwBaselineElbowAngle: 90,
       }).type,
     ).toBe('rejected');
@@ -306,16 +341,20 @@ describe('evaluateDecelerationThrow', () => {
     expect(
       evaluateDecelerationThrow({
         buffer: [baseline, poseSample(10_000, 0.52, 0.35)],
-        pendingPeak: { ...pendingPeak, wrist: { x: 0.52, y: 0.35 } },
-        throwBaselineWrist: { x: 0.5, y: 0.35 },
+        pendingPeak: { ...pendingPeak, wrist: { x: 0.52, y: 0.35, z: 0 } },
+        throwBaselineWrist: { x: 0.5, y: 0.35, z: 0 },
         throwBaselineElbowAngle: 90,
       }).type,
     ).toBe('rejected');
   });
 
   it('rejects cocking flexion when no forward release follows', () => {
-    const extendedBaseline = poseSample(9_900, 0.75, 0.32, 0, 0.5, 0.35);
-    const cockedPeak = poseSample(10_000, 0.52, 0.45, 0, 0.5, 0.5);
+    const extendedBaseline = withoutWorld(
+      poseSample(9_900, 0.75, 0.32, 0, 0.5, 0.35),
+    );
+    const cockedPeak = withoutWorld(
+      poseSample(10_000, 0.52, 0.45, 0, 0.5, 0.5),
+    );
 
     expect(
       evaluateDecelerationThrow({
@@ -323,18 +362,18 @@ describe('evaluateDecelerationThrow', () => {
         pendingPeak: {
           speed: 2.5,
           timestamp: 10_000,
-          wrist: { x: 0.52, y: 0.45 },
+          wrist: { x: 0.52, y: 0.45, z: 0 },
         },
-        throwBaselineWrist: { x: 0.75, y: 0.32 },
+        throwBaselineWrist: { x: 0.75, y: 0.32, z: 0 },
         throwBaselineElbowAngle: sampleElbowAngle(extendedBaseline),
       }).type,
     ).toBe('rejected');
   });
 
   it('recovers a forward release after a faster cocking peak', () => {
-    const baseline = poseAtForearmAngle(9_700, 25);
-    const cocked = poseAtForearmAngle(10_000, -55);
-    const released = poseAtForearmAngle(10_080, 60);
+    const baseline = worldSwingSample(9_700, 25);
+    const cocked = worldSwingSample(10_000, -55);
+    const released = worldSwingSample(10_080, 60);
 
     expect(
       evaluateDecelerationThrow({
@@ -342,9 +381,43 @@ describe('evaluateDecelerationThrow', () => {
         pendingPeak: {
           speed: 3,
           timestamp: 10_000,
-          wrist: { x: cocked.wrist.x, y: cocked.wrist.y },
+          wrist: {
+            x: cocked.world!.wrist.x,
+            y: cocked.world!.wrist.y,
+            z: cocked.world!.wrist.z,
+          },
         },
-        throwBaselineWrist: { x: baseline.wrist.x, y: baseline.wrist.y },
+        throwBaselineWrist: {
+          x: baseline.world!.wrist.x,
+          y: baseline.world!.wrist.y,
+          z: baseline.world!.wrist.z,
+        },
+        throwBaselineElbowAngle: sampleElbowAngle(baseline),
+      }),
+    ).toMatchObject({
+      type: 'accepted',
+      peakTimestamp: 10_080,
+    });
+  });
+
+  it('recovers a forward release from scaled 2D speed when world is missing', () => {
+    const baseline = withoutWorld(poseAtForearmAngle(9_700, 25));
+    const cocked = withoutWorld(poseAtForearmAngle(10_000, -55));
+    const released = withoutWorld(poseAtForearmAngle(10_080, 60));
+
+    expect(
+      evaluateDecelerationThrow({
+        buffer: [baseline, cocked, released],
+        pendingPeak: {
+          speed: 3,
+          timestamp: 10_000,
+          wrist: { x: cocked.wrist.x, y: cocked.wrist.y, z: 0 },
+        },
+        throwBaselineWrist: {
+          x: baseline.wrist.x,
+          y: baseline.wrist.y,
+          z: 0,
+        },
         throwBaselineElbowAngle: sampleElbowAngle(baseline),
       }),
     ).toMatchObject({
@@ -354,8 +427,8 @@ describe('evaluateDecelerationThrow', () => {
   });
 
   it('rejects insufficient elbow extension at deceleration evaluation', () => {
-    const baseline = poseSample(9_900, 0.45, 0.35, 0, 0.5, 0.5);
-    const peak = poseSample(10_000, 0.585, 0.265, 0, 0.5, 0.5);
+    const baseline = withoutWorld(poseSample(9_900, 0.45, 0.35, 0, 0.5, 0.5));
+    const peak = withoutWorld(poseSample(10_000, 0.585, 0.265, 0, 0.5, 0.5));
     const baselineAngle = sampleElbowAngle(baseline);
     const extension = sampleElbowAngle(peak) - baselineAngle;
 
@@ -367,12 +440,54 @@ describe('evaluateDecelerationThrow', () => {
         pendingPeak: {
           speed: 2.5,
           timestamp: 10_000,
-          wrist: { x: 0.585, y: 0.265 },
+          wrist: { x: 0.585, y: 0.265, z: 0 },
         },
-        throwBaselineWrist: { x: 0.45, y: 0.35 },
+        throwBaselineWrist: { x: 0.45, y: 0.35, z: 0 },
         throwBaselineElbowAngle: baselineAngle,
       }).type,
     ).toBe('rejected');
+  });
+
+  it('uses stored world baseline when lookback history is missing', () => {
+    const peak = poseAtForearmAngle(10_000, 60);
+    const aim = poseAtForearmAngle(9_000, 25);
+    expect(
+      evaluateDecelerationThrow({
+        buffer: [peak],
+        pendingPeak: {
+          speed: 2.5,
+          timestamp: 10_000,
+          wrist: {
+            x: peak.world!.wrist.x,
+            y: peak.world!.wrist.y,
+            z: peak.world!.wrist.z,
+          },
+        },
+        throwBaselineWrist: {
+          x: aim.world!.wrist.x,
+          y: aim.world!.wrist.y,
+          z: aim.world!.wrist.z,
+        },
+        throwBaselineElbowAngle: sampleElbowAngle(aim),
+      }).type,
+    ).toBe('accepted');
+  });
+
+  it('scales image travel when world joints are missing from the peak', () => {
+    const peak = withoutWorld(poseAtForearmAngle(10_000, 60));
+    const aim = withoutWorld(poseAtForearmAngle(9_000, 25));
+    expect(
+      evaluateDecelerationThrow({
+        buffer: [peak],
+        pendingPeak: {
+          speed: 2.5,
+          timestamp: 10_000,
+          wrist: { x: peak.wrist.x, y: peak.wrist.y, z: 0 },
+        },
+        throwBaselineWrist: { x: aim.wrist.x, y: aim.wrist.y, z: 0 },
+        throwBaselineElbowAngle: sampleElbowAngle(aim),
+      }).type,
+    ).toBe('accepted');
   });
 });
 
@@ -659,6 +774,55 @@ describe('ThrowDetector', () => {
     timestamp += FRAME_MS;
     decelerateToRest(detector, timestamp, 0.55);
     expect(detector.isCollectingPostRoll()).toBe(false);
+  });
+
+  it('accepts a facing-camera throw driven by world-Z wrist travel', () => {
+    const detector = new ThrowDetector();
+    let timestamp = longPrime(detector, 10_000);
+    timestamp = facingCameraThrow(detector, timestamp);
+    expect(detector.isCollectingPostRoll()).toBe(true);
+  });
+
+  it('detects a throw from scaled 2D motion when world landmarks are absent', () => {
+    const detector = new ThrowDetector();
+    let timestamp = 10_000;
+    const wrist = forearmWrist(25);
+    for (let frame = 0; frame < 55; frame++) {
+      detector.addSample(
+        withoutWorld(poseSample(timestamp, wrist.x, wrist.y, 0, 0.5, 0.5)),
+        false,
+      );
+      timestamp += FRAME_MS;
+    }
+    timestamp = imageOnlyAcceleratingThrow(detector, timestamp);
+    expect(detector.isCollectingPostRoll()).toBe(true);
+  });
+
+  it('ignores slow world-space wrist drift', () => {
+    const detector = new ThrowDetector();
+    let timestamp = longPrime(detector, 10_000);
+    let depth = 0;
+    for (let frame = 0; frame < 20; frame++) {
+      depth += 0.2 * (FRAME_MS / 1000);
+      detector.addSample(worldDriftSample(timestamp, depth));
+      timestamp += FRAME_MS;
+    }
+    expect(detector.isCollectingPostRoll()).toBe(false);
+    expect(detector.getCurrentWristSpeed()).toBeLessThan(0.4);
+  });
+
+  it('resets smoothed world history when landmarks drop to 2D', () => {
+    const detector = new ThrowDetector();
+    let timestamp = longPrime(detector, 10_000);
+    detector.addSample(poseSample(timestamp, 0.55, 0.35));
+    timestamp += FRAME_MS;
+    detector.addSample(
+      withoutWorld(poseSample(timestamp, 0.7, 0.35)),
+    );
+    expect(detector.isCollectingPostRoll()).toBe(false);
+
+    detector.addSample(poseSample(timestamp, 0.72, 0.35));
+    expect(detector.getCurrentWristSpeed()).toBe(0);
   });
 });
 

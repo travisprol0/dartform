@@ -2,30 +2,25 @@ import type {
   PoseLandmark,
   TrackedPoseLandmarks,
 } from './throwingArm';
-import { dist3d } from './geometry';
+import { dist3d, elbowAngle3d } from './geometry';
 
 /**
- * Throw detection is built around the throwing arm, not a single camera view.
- *
- * Image-space wrist speed and "up vs sideways" travel change with stance,
- * distance to the camera, and whether the thrower is side-on or facing the
- * lens. A dart throw is instead: elbow cocks then extends, optionally with
- * wrist speed in forearm-lengths per second (scale-invariant), plus world-Z
- * travel when the dart is aimed at the camera. That is meant to hold for
- * left/right hands, close/far setup, and multiple camera angles.
+ * Throw detection uses MediaPipe world landmarks (meters) so speed and
+ * travel do not depend on how large the thrower is in the image, or whether
+ * the dart moves toward the camera. Image x/y is a scaled fallback only.
  */
 
-/** Normalized image-space wrist speed (units per second). */
-export const THROW_SPEED_THRESHOLD = 0.35;
+/** Typical adult forearm; used to convert 2D image speed into meters/second. */
+export const CANONICAL_FOREARM_LENGTH_M = 0.25;
 
-/** Reject throw events whose peak speed is below this. */
-export const MIN_PEAK_SPEED = 1.6;
+/** Wrist speed that starts a throw candidate (meters/second). */
+export const THROW_SPEED_THRESHOLD = 0.4;
 
-/** Wrist must travel at least this far from throw start to peak. */
-export const MIN_THROW_DISPLACEMENT = 0.07;
+/** Snap / no-shape throws still need this peak (meters/second). */
+export const MIN_PEAK_SPEED = 1.4;
 
-/** World-space wrist travel (meters). Covers throws aimed at the camera, where 2D travel is tiny. */
-export const MIN_WORLD_DISPLACEMENT = 0.08;
+/** Wrist must travel at least this far from throw start to peak (meters). */
+export const MIN_THROW_DISPLACEMENT = 0.08;
 
 /** Elbow must extend by at least this many degrees during the motion. */
 export const MIN_ELBOW_EXTENSION_DEG = 3;
@@ -60,14 +55,12 @@ export type ThrowTrace = {
 export const MIN_BACKSWING_FLEXION_DEG = 8;
 
 /**
- * Cock-then-extend still needs a real whip. Slow uncocking after a pause
- * at the rear is not a throw (seen as ~0.57 image units/s).
+ * Cock-then-extend still needs a real stroke. Slow uncocking is ~0.5 m/s.
  */
-export const THROW_SHAPE_MIN_PEAK_SPEED = 1;
+export const THROW_SHAPE_MIN_PEAK_SPEED = 0.8;
 
 /**
  * Already-cocked snap throw, in forearm-lengths per second.
- * Dividing by forearm length keeps the bar similar up close or far from the camera.
  */
 export const SNAP_THROW_NORMALIZED_SPEED = 8;
 
@@ -77,10 +70,16 @@ const MAX_SAMPLE_GAP_MS = 200;
 const MOTION_SETTLE_FRAMES = 8;
 export const BASELINE_LOOKBACK_MS = 300;
 
+export type WristPoint = {
+  x: number;
+  y: number;
+  z: number;
+};
+
 export type PendingPeak = {
   speed: number;
   timestamp: number;
-  wrist: { x: number; y: number };
+  wrist: WristPoint;
 };
 
 export type DecelerationOutcome =
@@ -121,7 +120,60 @@ export type PendingThrow = {
   peakSpeed: number;
 };
 
+function imageForearmLength(sample: PoseSample): number {
+  return Math.max(
+    Math.hypot(
+      sample.wrist.x - sample.elbow.x,
+      sample.wrist.y - sample.elbow.y,
+    ),
+    1e-6,
+  );
+}
+
+function worldForearmLength(sample: PoseSample): number {
+  if (!sample.world) {
+    return CANONICAL_FOREARM_LENGTH_M;
+  }
+  return Math.max(
+    dist3d(sample.world.wrist, sample.world.elbow),
+    1e-6,
+  );
+}
+
+function scaledImageSpeed(imageSpeed: number, sample: PoseSample): number {
+  return (
+    (imageSpeed / imageForearmLength(sample)) * CANONICAL_FOREARM_LENGTH_M
+  );
+}
+
+function scaledImageTravel(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  sample: PoseSample,
+): number {
+  const image = Math.hypot(to.x - from.x, to.y - from.y);
+  return (image / imageForearmLength(sample)) * CANONICAL_FOREARM_LENGTH_M;
+}
+
+function worldWrist(sample: PoseSample): WristPoint | null {
+  if (!sample.world) {
+    return null;
+  }
+  return {
+    x: sample.world.wrist.x,
+    y: sample.world.wrist.y,
+    z: sample.world.wrist.z,
+  };
+}
+
 export function sampleElbowAngle(sample: PoseSample): number {
+  if (sample.world) {
+    return elbowAngle3d(
+      sample.world.shoulder,
+      sample.world.elbow,
+      sample.world.wrist,
+    );
+  }
   const { shoulder, elbow, wrist } = sample;
   const ux = shoulder.x - elbow.x;
   const uy = shoulder.y - elbow.y;
@@ -135,6 +187,39 @@ export function sampleElbowAngle(sample: PoseSample): number {
   }
   const cos = Math.max(-1, Math.min(1, dot / (magU * magV)));
   return (Math.acos(cos) * 180) / Math.PI;
+}
+
+export function wristSpeedMeters(
+  previous: PoseSample,
+  next: PoseSample,
+): number {
+  const dt = (next.timestamp - previous.timestamp) / 1000;
+  if (dt <= 0) {
+    return 0;
+  }
+  const previousWorld = worldWrist(previous);
+  const nextWorld = worldWrist(next);
+  if (previousWorld && nextWorld) {
+    return dist3d(previousWorld, nextWorld) / dt;
+  }
+  const imageSpeed =
+    Math.hypot(
+      next.wrist.x - previous.wrist.x,
+      next.wrist.y - previous.wrist.y,
+    ) / dt;
+  return scaledImageSpeed(imageSpeed, next);
+}
+
+export function wristTravelMeters(
+  from: PoseSample,
+  to: PoseSample,
+): number {
+  const fromWorld = worldWrist(from);
+  const toWorld = worldWrist(to);
+  if (fromWorld && toWorld) {
+    return dist3d(fromWorld, toWorld);
+  }
+  return scaledImageTravel(from.wrist, to.wrist, to);
 }
 
 export function sampleAtOrBefore(
@@ -194,13 +279,9 @@ export function evaluateThrowCandidate(params: {
   peakSpeed: number;
   displacement: number;
   elbowExtension: number;
-  wristDx?: number;
-  wristDy?: number;
-  worldDisplacement?: number;
   backswingFlexion?: number;
   forearmNormalizedSpeed?: number;
 }): string | null {
-  // Prefer cock-then-extend (any stance) over image-up vs image-side heuristics.
   if (params.peakSpeed < THROW_SPEED_THRESHOLD) {
     return 'peak_speed';
   }
@@ -225,14 +306,7 @@ export function evaluateThrowCandidate(params: {
     return 'peak_speed';
   }
   if (params.displacement < MIN_THROW_DISPLACEMENT) {
-    const worldHelpsFacingCamera =
-      params.worldDisplacement !== undefined &&
-      params.worldDisplacement >= MIN_WORLD_DISPLACEMENT &&
-      params.peakSpeed >= MIN_PEAK_SPEED &&
-      params.displacement >= 0.04;
-    if (!worldHelpsFacingCamera) {
-      return 'displacement';
-    }
+    return 'displacement';
   }
   return null;
 }
@@ -254,35 +328,10 @@ export function findNearestTracePeakIndex(
   return newPeakIndex;
 }
 
-function frameSpeed(previous: PoseSample, next: PoseSample): number {
-  const dt = (next.timestamp - previous.timestamp) / 1000;
-  if (dt <= 0) {
-    return 0;
-  }
-  return (
-    Math.hypot(
-      next.wrist.x - previous.wrist.x,
-      next.wrist.y - previous.wrist.y,
-    ) / dt
-  );
-}
-
-function forearmLength(sample: PoseSample): number {
-  // Image-unit forearm; used so speed is comparable at different camera distances.
-  return Math.max(
-    Math.hypot(
-      sample.wrist.x - sample.elbow.x,
-      sample.wrist.y - sample.elbow.y,
-    ),
-    1e-6,
-  );
-}
-
 function measureThrowShape(
   buffer: PoseSample[],
   peakIndex: number,
 ): { backswingFlexion: number; forwardExtension: number } {
-  // Cock-then-extend from elbow angle, independent of which way the player faces.
   const peakTime = buffer[peakIndex].timestamp;
   let startIndex = peakIndex;
   while (
@@ -311,7 +360,7 @@ function findForwardReleasePeak(
   let bestIndex = -1;
   let bestSpeed = 0;
   for (let index = cockingPeakIndex + 1; index < buffer.length; index++) {
-    const speed = frameSpeed(buffer[index - 1], buffer[index]);
+    const speed = wristSpeedMeters(buffer[index - 1], buffer[index]);
     const extension =
       sampleElbowAngle(buffer[index]) - baselineElbowAngle;
     if (
@@ -329,10 +378,39 @@ function findForwardReleasePeak(
   return { index: bestIndex, speed: bestSpeed };
 }
 
+function applySmoothedWrist(
+  sample: PoseSample,
+  smoothed: WristPoint,
+  fromWorld: boolean,
+): PoseSample {
+  if (fromWorld && sample.world) {
+    return {
+      ...sample,
+      world: {
+        ...sample.world,
+        wrist: {
+          ...sample.world.wrist,
+          x: smoothed.x,
+          y: smoothed.y,
+          z: smoothed.z,
+        },
+      },
+    };
+  }
+  return {
+    ...sample,
+    wrist: {
+      ...sample.wrist,
+      x: smoothed.x,
+      y: smoothed.y,
+    },
+  };
+}
+
 export function evaluateDecelerationThrow(params: {
   buffer: PoseSample[];
   pendingPeak: PendingPeak;
-  throwBaselineWrist: { x: number; y: number } | null;
+  throwBaselineWrist: WristPoint | null;
   throwBaselineElbowAngle: number | null;
   skipCockingRecovery?: boolean;
 }): DecelerationOutcome {
@@ -349,18 +427,21 @@ export function evaluateDecelerationThrow(params: {
     params.buffer,
     params.pendingPeak.timestamp - BASELINE_LOOKBACK_MS,
   );
-  const baselineWrist = lookbackSample
-    ? { x: lookbackSample.wrist.x, y: lookbackSample.wrist.y }
-    : params.throwBaselineWrist;
-  const peakWrist = lookbackSample
-    ? { x: peakSample.wrist.x, y: peakSample.wrist.y }
-    : params.pendingPeak.wrist;
-  const displacement = baselineWrist
-    ? Math.hypot(
-        peakWrist.x - baselineWrist.x,
-        peakWrist.y - baselineWrist.y,
-      )
-    : 0;
+  let displacement = 0;
+  if (lookbackSample) {
+    displacement = wristTravelMeters(lookbackSample, peakSample);
+  } else if (params.throwBaselineWrist) {
+    const peakWorld = worldWrist(peakSample);
+    if (peakWorld) {
+      displacement = dist3d(params.throwBaselineWrist, peakWorld);
+    } else {
+      displacement = scaledImageTravel(
+        params.throwBaselineWrist,
+        params.pendingPeak.wrist,
+        peakSample,
+      );
+    }
+  }
   const peakElbowAngle = sampleElbowAngle(peakSample);
   const baselineElbowAngle = lookbackSample
     ? sampleElbowAngle(lookbackSample)
@@ -371,21 +452,12 @@ export function evaluateDecelerationThrow(params: {
       : 0;
   const shape = measureThrowShape(params.buffer, peakIndex);
   const forearmNormalizedSpeed =
-    params.pendingPeak.speed / forearmLength(peakSample);
+    params.pendingPeak.speed / worldForearmLength(peakSample);
 
-  const wristDx = baselineWrist ? peakWrist.x - baselineWrist.x : 0;
-  const wristDy = baselineWrist ? peakWrist.y - baselineWrist.y : 0;
-  const worldDisplacement =
-    lookbackSample?.world && peakSample.world
-      ? dist3d(lookbackSample.world.wrist, peakSample.world.wrist)
-      : undefined;
   const rejectReason = evaluateThrowCandidate({
     peakSpeed: params.pendingPeak.speed,
     displacement,
     elbowExtension,
-    wristDx,
-    wristDy,
-    worldDisplacement,
     backswingFlexion: shape.backswingFlexion,
     forearmNormalizedSpeed,
   });
@@ -403,12 +475,17 @@ export function evaluateDecelerationThrow(params: {
     );
     if (release) {
       const releaseSample = params.buffer[release.index];
+      const releaseWrist = worldWrist(releaseSample) ?? {
+        x: releaseSample.wrist.x,
+        y: releaseSample.wrist.y,
+        z: 0,
+      };
       return evaluateDecelerationThrow({
         buffer: params.buffer,
         pendingPeak: {
           speed: release.speed,
           timestamp: releaseSample.timestamp,
-          wrist: { x: releaseSample.wrist.x, y: releaseSample.wrist.y },
+          wrist: releaseWrist,
         },
         throwBaselineWrist: params.throwBaselineWrist,
         throwBaselineElbowAngle: params.throwBaselineElbowAngle,
@@ -432,9 +509,13 @@ export function evaluateDecelerationThrow(params: {
 export class ThrowDetector {
   private buffer: PoseSample[] = [];
 
-  private wristHistory: { x: number; y: number }[] = [];
+  private wristHistory: WristPoint[] = [];
 
-  private previousSmoothedWrist: { x: number; y: number } | null = null;
+  private previousSmoothedWrist: WristPoint | null = null;
+
+  private previousHadWorld = false;
+
+  private previousSample: PoseSample | null = null;
 
   private previousSampleAt: number | null = null;
 
@@ -442,17 +523,13 @@ export class ThrowDetector {
 
   private wasAboveThreshold = false;
 
-  private pendingPeak: {
-    speed: number;
-    timestamp: number;
-    wrist: { x: number; y: number };
-  } | null = null;
+  private pendingPeak: PendingPeak | null = null;
 
   private pendingThrow: PendingThrow | null = null;
 
   private armed = true;
 
-  private throwBaselineWrist: { x: number; y: number } | null = null;
+  private throwBaselineWrist: WristPoint | null = null;
 
   private throwBaselineElbowAngle: number | null = null;
 
@@ -462,19 +539,27 @@ export class ThrowDetector {
 
   private quietFrames = 0;
 
-  private smoothWrist(wrist: { x: number; y: number }): { x: number; y: number } {
+  private smoothWrist(wrist: WristPoint): WristPoint {
     this.wristHistory.push(wrist);
     if (this.wristHistory.length > WRIST_SMOOTHING_FRAMES) {
       this.wristHistory.shift();
     }
 
     const total = this.wristHistory.reduce(
-      (acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }),
-      { x: 0, y: 0 },
+      (acc, point) => ({
+        x: acc.x + point.x,
+        y: acc.y + point.y,
+        z: acc.z + point.z,
+      }),
+      { x: 0, y: 0, z: 0 },
     );
     const count = this.wristHistory.length;
 
-    return { x: total.x / count, y: total.y / count };
+    return {
+      x: total.x / count,
+      y: total.y / count,
+      z: total.z / count,
+    };
   }
 
   getCurrentWristSpeed(): number {
@@ -503,15 +588,24 @@ export class ThrowDetector {
   }
 
   addSample(sample: PoseSample, detectionEnabled = true): ThrowEvent | null {
-    const smoothedWrist = this.smoothWrist(sample.wrist);
-    const smoothedSample: PoseSample = {
-      ...sample,
-      wrist: {
-        ...sample.wrist,
-        x: smoothedWrist.x,
-        y: smoothedWrist.y,
-      },
+    const hasWorld = sample.world !== undefined;
+    const rawWrist = worldWrist(sample) ?? {
+      x: sample.wrist.x,
+      y: sample.wrist.y,
+      z: 0,
     };
+    if (
+      this.wristHistory.length > 0 &&
+      hasWorld !== this.previousHadWorld
+    ) {
+      this.wristHistory = [];
+    }
+    const smoothedWrist = this.smoothWrist(rawWrist);
+    const smoothedSample = applySmoothedWrist(
+      sample,
+      smoothedWrist,
+      hasWorld,
+    );
 
     this.buffer.push(sample);
     if (this.buffer.length > BUFFER_SIZE) {
@@ -522,11 +616,19 @@ export class ThrowDetector {
     }
 
     const previousWrist = this.previousSmoothedWrist;
+    const previousSample = this.previousSample;
+    const previousHadWorld = this.previousHadWorld;
     const previousSampleAt = this.previousSampleAt;
     this.previousSmoothedWrist = smoothedWrist;
+    this.previousSample = sample;
+    this.previousHadWorld = hasWorld;
     this.previousSampleAt = sample.timestamp;
 
-    if (!previousWrist || previousSampleAt === null) {
+    if (
+      !previousWrist ||
+      previousSample === null ||
+      previousSampleAt === null
+    ) {
       this.currentWristSpeed = 0;
       return null;
     }
@@ -536,9 +638,16 @@ export class ThrowDetector {
     const dt = gapMs / 1000;
     let speed = 0;
     if (dt > 0 && gapMs <= MAX_SAMPLE_GAP_MS) {
-      const dx = smoothedWrist.x - previousWrist.x;
-      const dy = smoothedWrist.y - previousWrist.y;
-      speed = Math.sqrt(dx * dx + dy * dy) / dt;
+      if (hasWorld && previousHadWorld) {
+        speed = dist3d(previousWrist, smoothedWrist) / dt;
+      } else {
+        const imageSpeed =
+          Math.hypot(
+            sample.wrist.x - previousSample.wrist.x,
+            sample.wrist.y - previousSample.wrist.y,
+          ) / dt;
+        speed = scaledImageSpeed(imageSpeed, sample);
+      }
     }
     this.currentWristSpeed = speed;
 
@@ -562,11 +671,8 @@ export class ThrowDetector {
 
     if (dt <= 0 || gapMs > MAX_SAMPLE_GAP_MS) {
       this.resetMotionCandidate();
-      this.wristHistory = [sample.wrist];
-      this.previousSmoothedWrist = {
-        x: sample.wrist.x,
-        y: sample.wrist.y,
-      };
+      this.wristHistory = [rawWrist];
+      this.previousSmoothedWrist = rawWrist;
       return null;
     }
 
@@ -675,6 +781,8 @@ export class ThrowDetector {
     this.buffer = [];
     this.wristHistory = [];
     this.previousSmoothedWrist = null;
+    this.previousHadWorld = false;
+    this.previousSample = null;
     this.previousSampleAt = null;
     this.lastThrowAt = 0;
     this.wasAboveThreshold = false;

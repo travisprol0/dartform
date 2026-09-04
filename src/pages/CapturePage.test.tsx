@@ -405,7 +405,7 @@ describe('CapturePage rotation and capture HUD', () => {
     expect(debug).toContain('Inference: 9.4 ms');
     expect(debug).toContain('Arm visible: yes');
     expect(debug).toContain('Stable frames: 8 / 8');
-    expect(debug).toContain('Wrist speed: 2.50');
+    expect(debug).toContain('Wrist speed: 2.50 m/s');
 
     act(() => {
       container

@@ -58,6 +58,11 @@ export function poseSample(
   };
 }
 
+export function withoutWorld(sample: PoseSample): PoseSample {
+  const { world: _world, ...rest } = sample;
+  return rest;
+}
+
 export function makeThrowTrace(
   horizontalOffset = 0,
   timingScale = 1,
