@@ -139,10 +139,18 @@ describe('evaluateThrowCandidate', () => {
     expect(
       evaluateThrowCandidate({
         peakSpeed: 2.5,
-        displacement: 0.1,
+        displacement: 0.04,
         elbowExtension: 20,
       }),
     ).toBe('displacement');
+    expect(
+      evaluateThrowCandidate({
+        peakSpeed: 2.5,
+        displacement: 0.04,
+        elbowExtension: 20,
+        worldDisplacement: 0.2,
+      }),
+    ).toBeNull();
     expect(
       evaluateThrowCandidate({
         peakSpeed: 2.5,

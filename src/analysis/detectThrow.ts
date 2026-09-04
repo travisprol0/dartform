@@ -2,15 +2,19 @@ import type {
   PoseLandmark,
   TrackedPoseLandmarks,
 } from './throwingArm';
+import { dist3d } from './geometry';
 
 /** Normalized image-space wrist speed (units per second). */
 export const THROW_SPEED_THRESHOLD = 0.35;
 
 /** Reject throw events whose peak speed is below this. */
-export const MIN_PEAK_SPEED = 2;
+export const MIN_PEAK_SPEED = 1.6;
 
 /** Wrist must travel at least this far from throw start to peak. */
-export const MIN_THROW_DISPLACEMENT = 0.15;
+export const MIN_THROW_DISPLACEMENT = 0.07;
+
+/** World-space wrist travel (meters) can satisfy displacement when image travel is small. */
+export const MIN_WORLD_DISPLACEMENT = 0.08;
 
 /** Elbow must extend by at least this many degrees during the motion. */
 export const MIN_ELBOW_EXTENSION_DEG = 3;
@@ -164,11 +168,16 @@ export function evaluateThrowCandidate(params: {
   elbowExtension: number;
   wristDx?: number;
   wristDy?: number;
+  worldDisplacement?: number;
 }): string | null {
   if (params.peakSpeed < MIN_PEAK_SPEED) {
     return 'peak_speed';
   }
-  if (params.displacement < MIN_THROW_DISPLACEMENT) {
+  if (
+    params.displacement < MIN_THROW_DISPLACEMENT &&
+    (params.worldDisplacement === undefined ||
+      params.worldDisplacement < MIN_WORLD_DISPLACEMENT)
+  ) {
     return 'displacement';
   }
   if (params.elbowExtension < MAX_COCKING_FLEXION_DEG) {
@@ -218,6 +227,9 @@ export function evaluateDecelerationThrow(params: {
     params.pendingPeak.timestamp,
   );
   if (peakIndex < 0) {
+    // #region agent log
+    fetch('http://127.0.0.1:7778/ingest/243a2c52-e675-4a00-ac2e-6c44421b6c3b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9fcd96'},body:JSON.stringify({sessionId:'9fcd96',runId:'missed-throws',hypothesisId:'D',location:'detectThrow.ts:evaluateDecelerationThrow',message:'missing peak frame',data:{peakTimestamp:params.pendingPeak.timestamp,bufferLength:params.buffer.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     return { type: 'missing_peak' };
   }
 
@@ -249,13 +261,22 @@ export function evaluateDecelerationThrow(params: {
 
   const wristDx = baselineWrist ? peakWrist.x - baselineWrist.x : 0;
   const wristDy = baselineWrist ? peakWrist.y - baselineWrist.y : 0;
+  const worldDisplacement =
+    lookbackSample?.world && peakSample.world
+      ? dist3d(lookbackSample.world.wrist, peakSample.world.wrist)
+      : undefined;
   const rejectReason = evaluateThrowCandidate({
     peakSpeed: params.pendingPeak.speed,
     displacement,
     elbowExtension,
     wristDx,
     wristDy,
+    worldDisplacement,
   });
+
+  // #region agent log
+  fetch('http://127.0.0.1:7778/ingest/243a2c52-e675-4a00-ac2e-6c44421b6c3b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9fcd96'},body:JSON.stringify({sessionId:'9fcd96',runId:'missed-throws',hypothesisId:rejectReason==='peak_speed'?'A':rejectReason==='arm_raise'?'B':rejectReason?'C':'E',location:'detectThrow.ts:evaluateDecelerationThrow',message:'candidate evaluated',data:{peakIndex,peakSpeed:params.pendingPeak.speed,minPeak:MIN_PEAK_SPEED,displacement,elbowExtension,wristDx,wristDy,upward: -wristDy,rejectReason,outcome:rejectReason?'rejected':'accepted'},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   if (rejectReason) {
     return { type: 'rejected' };
@@ -387,6 +408,11 @@ export class ThrowDetector {
     }
 
     if (!detectionEnabled) {
+      if (speed >= THROW_SPEED_THRESHOLD) {
+        // #region agent log
+        fetch('http://127.0.0.1:7778/ingest/243a2c52-e675-4a00-ac2e-6c44421b6c3b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9fcd96'},body:JSON.stringify({sessionId:'9fcd96',runId:'missed-throws',hypothesisId:'D',location:'detectThrow.ts:addSample',message:'motion while detection disabled',data:{speed},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+      }
       this.resetMotionCandidate();
       return null;
     }
@@ -396,6 +422,11 @@ export class ThrowDetector {
     }
 
     if (now - this.lastThrowAt < THROW_LOCKOUT_MS) {
+      if (speed >= MIN_PEAK_SPEED) {
+        // #region agent log
+        fetch('http://127.0.0.1:7778/ingest/243a2c52-e675-4a00-ac2e-6c44421b6c3b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9fcd96'},body:JSON.stringify({sessionId:'9fcd96',runId:'missed-throws',hypothesisId:'D',location:'detectThrow.ts:addSample',message:'throw-speed motion during lockout',data:{speed,msSinceLastThrow:now-this.lastThrowAt,lockoutMs:THROW_LOCKOUT_MS},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+      }
       return null;
     }
 
