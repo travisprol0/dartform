@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { installCloudflareWebAnalytics } from './cloudflareWebAnalytics';
+import {
+  installCloudflareWebAnalytics,
+  type BeaconDocument,
+} from './cloudflareWebAnalytics';
+
+type TrackedScript = {
+  type: string;
+  src: string;
+  attrs: Record<string, string>;
+  setAttribute(name: string, value: string): void;
+};
 
 function makeDocument() {
-  const scripts: Array<{
-    type: string;
-    src: string;
-    attrs: Record<string, string>;
-  }> = [];
+  const scripts: TrackedScript[] = [];
 
-  const doc = {
+  const doc: BeaconDocument = {
     querySelector(selectors: string) {
       const match = /^script\[src="(.+)"\]$/.exec(selectors);
       if (!match) {
@@ -20,10 +26,10 @@ function makeDocument() {
       if (tagName !== 'script') {
         throw new Error(`unexpected tag ${tagName}`);
       }
-      const script = {
+      const script: TrackedScript = {
         type: '',
         src: '',
-        attrs: {} as Record<string, string>,
+        attrs: {},
         setAttribute(name: string, value: string) {
           script.attrs[name] = value;
         },
@@ -31,12 +37,8 @@ function makeDocument() {
       return script;
     },
     head: {
-      appendChild(node: {
-        type: string;
-        src: string;
-        attrs: Record<string, string>;
-      }) {
-        scripts.push(node);
+      appendChild(node) {
+        scripts.push(node as TrackedScript);
         return node;
       },
     },

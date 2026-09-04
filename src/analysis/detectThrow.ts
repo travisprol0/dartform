@@ -662,6 +662,10 @@ export class ThrowDetector {
     return this.pendingThrow !== null;
   }
 
+  getPendingPeakTimestamp(): number | null {
+    return this.pendingThrow?.peakTimestamp ?? null;
+  }
+
   isArmed(): boolean {
     return this.armed;
   }

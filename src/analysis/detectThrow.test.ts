@@ -19,12 +19,14 @@ import {
 import { poseSample } from '../test/fixtures';
 import {
   FRAME_MS,
-  THROW_END_X,
+  THROW_PEAK_WRIST,
+  acceptedThrowBuffer,
   acceleratingThrow,
   decelerateToRest,
   degenerateElbowSample,
   floodBufferBeforeFinalize,
   longPrime,
+  poseAtForearmAngle,
   shortPrime,
   tinyDisplacementThrow,
   validThrowWithLookback,
@@ -33,12 +35,30 @@ import {
 function settleAt(
   detector: ThrowDetector,
   timestamp: number,
-  wristX: number,
+  wrist = THROW_PEAK_WRIST,
   frames = 10,
 ): number {
   for (let frame = 0; frame < frames; frame++) {
-    detector.addSample(poseSample(timestamp, wristX, 0.35));
+    detector.addSample(poseSample(timestamp, wrist.x, wrist.y));
     timestamp += FRAME_MS;
+  }
+  return timestamp;
+}
+
+function repeatThrowUntilPostRoll(
+  detector: ThrowDetector,
+  timestamp: number,
+  maxAttempts = 8,
+): number {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (detector.isCollectingPostRoll()) {
+      return timestamp;
+    }
+    timestamp = acceleratingThrow(detector, timestamp);
+    timestamp = decelerateToRest(detector, timestamp);
+  }
+  if (!detector.isCollectingPostRoll()) {
+    throw new Error('Expected throw to enter post-roll collection.');
   }
   return timestamp;
 }
@@ -50,7 +70,9 @@ function emitThrow(
   let emitted: ThrowEvent | null = null;
   let ts = timestamp;
   for (let frame = 0; frame < 40 && emitted === null; frame++) {
-    emitted = detector.addSample(poseSample(ts, THROW_END_X, 0.35));
+    emitted = detector.addSample(
+      poseSample(ts, THROW_PEAK_WRIST.x, THROW_PEAK_WRIST.y),
+    );
     ts += FRAME_MS;
   }
   if (!emitted) {
@@ -218,16 +240,22 @@ describe('evaluateDecelerationThrow', () => {
   });
 
   it('uses lookback baseline when enough history is present', () => {
+    const peakTimestamp = 10_000;
     const buffer = [
-      poseSample(9_600, 0.5, 0.35),
-      poseSample(9_800, 0.42, 0.48),
-      poseSample(9_900, 0.52, 0.35),
-      poseSample(10_000, 0.9, 0.35),
+      poseAtForearmAngle(9_600, 25),
+      poseAtForearmAngle(9_800, -55),
+      poseAtForearmAngle(9_900, 10),
+      poseAtForearmAngle(peakTimestamp, 60),
     ];
+    const release = buffer[buffer.length - 1];
     expect(
       evaluateDecelerationThrow({
         buffer,
-        pendingPeak,
+        pendingPeak: {
+          speed: 2.5,
+          timestamp: peakTimestamp,
+          wrist: { x: release.wrist.x, y: release.wrist.y },
+        },
         throwBaselineWrist: null,
         throwBaselineElbowAngle: null,
       }).type,
@@ -235,19 +263,18 @@ describe('evaluateDecelerationThrow', () => {
   });
 
   it('falls back to motion-start baselines without lookback history', () => {
-    const baseline = poseSample(9_900, 0.52, 0.35);
-    const cocked = poseSample(9_950, 0.42, 0.48);
-    const peak = poseSample(10_000, 0.9, 0.35);
+    const { buffer, pendingPeak, throwBaselineWrist, throwBaselineElbowAngle } =
+      acceptedThrowBuffer();
     expect(
       evaluateDecelerationThrow({
-        buffer: [baseline, cocked, peak],
+        buffer,
         pendingPeak,
-        throwBaselineWrist: { x: 0.52, y: 0.35 },
-        throwBaselineElbowAngle: sampleElbowAngle(baseline),
+        throwBaselineWrist,
+        throwBaselineElbowAngle,
       }),
     ).toMatchObject({
       type: 'accepted',
-      peakTimestamp: 10_000,
+      peakTimestamp: pendingPeak.timestamp,
     });
   });
 
@@ -286,7 +313,7 @@ describe('evaluateDecelerationThrow', () => {
     ).toBe('rejected');
   });
 
-  it('rejects cocking flexion at deceleration evaluation', () => {
+  it('rejects cocking flexion when no forward release follows', () => {
     const extendedBaseline = poseSample(9_900, 0.75, 0.32, 0, 0.5, 0.35);
     const cockedPeak = poseSample(10_000, 0.52, 0.45, 0, 0.5, 0.5);
 
@@ -305,9 +332,9 @@ describe('evaluateDecelerationThrow', () => {
   });
 
   it('recovers a forward release after a faster cocking peak', () => {
-    const baseline = poseSample(9_700, 0.75, 0.32, 0, 0.5, 0.35);
-    const cocked = poseSample(10_000, 0.52, 0.45, 0, 0.5, 0.5);
-    const released = poseSample(10_040, 0.92, 0.32, 0, 0.5, 0.35);
+    const baseline = poseAtForearmAngle(9_700, 25);
+    const cocked = poseAtForearmAngle(10_000, -55);
+    const released = poseAtForearmAngle(10_080, 60);
 
     expect(
       evaluateDecelerationThrow({
@@ -315,12 +342,15 @@ describe('evaluateDecelerationThrow', () => {
         pendingPeak: {
           speed: 3,
           timestamp: 10_000,
-          wrist: { x: 0.52, y: 0.45 },
+          wrist: { x: cocked.wrist.x, y: cocked.wrist.y },
         },
-        throwBaselineWrist: { x: 0.75, y: 0.32 },
+        throwBaselineWrist: { x: baseline.wrist.x, y: baseline.wrist.y },
         throwBaselineElbowAngle: sampleElbowAngle(baseline),
-      }).type,
-    ).toBe('accepted');
+      }),
+    ).toMatchObject({
+      type: 'accepted',
+      peakTimestamp: 10_080,
+    });
   });
 
   it('rejects insufficient elbow extension at deceleration evaluation', () => {
@@ -380,7 +410,7 @@ describe('ThrowDetector', () => {
     expect(detector.isCollectingPostRoll()).toBe(false);
     expect(detector.isArmed()).toBe(false);
 
-    timestamp = settleAt(detector, afterEmit, THROW_END_X, 10);
+    timestamp = settleAt(detector, afterEmit, THROW_PEAK_WRIST, 10);
     expect(detector.isArmed()).toBe(true);
   });
 
@@ -454,22 +484,22 @@ describe('ThrowDetector', () => {
   it('exposes wrist speed and respects throw lockout', () => {
     const detector = new ThrowDetector();
     let timestamp = longPrime(detector, 10_000);
-    for (let frame = 1; frame <= 5; frame++) {
-      detector.addSample(
-        poseSample(timestamp, 0.5 + 0.006 * frame ** 2, 0.35),
-      );
-      timestamp += FRAME_MS;
-    }
+    timestamp = acceleratingThrow(
+      detector,
+      timestamp,
+      THROW_PEAK_WRIST,
+      0.5,
+      0.5,
+      0,
+    );
     expect(detector.getCurrentWristSpeed()).toBeGreaterThan(0);
-
-    timestamp = acceleratingThrow(detector, timestamp);
-    while (!detector.isCollectingPostRoll()) {
-      timestamp = acceleratingThrow(detector, timestamp, THROW_END_X);
+    if (!detector.isCollectingPostRoll()) {
+      timestamp = repeatThrowUntilPostRoll(detector, timestamp, 7);
     }
 
     const { timestamp: afterEmit } = emitThrow(detector, timestamp);
     const locked = detector.addSample(
-      poseSample(afterEmit, THROW_END_X + 0.5, 0.35),
+      poseSample(afterEmit, THROW_PEAK_WRIST.x + 0.5, THROW_PEAK_WRIST.y),
     );
     expect(locked).toBeNull();
   });
@@ -519,10 +549,7 @@ describe('ThrowDetector', () => {
   it('rearms after quiet frames and ignores fast motion while disarmed', () => {
     const detector = new ThrowDetector();
     let timestamp = longPrime(detector, 10_000);
-    timestamp = acceleratingThrow(detector, timestamp);
-    while (!detector.isCollectingPostRoll()) {
-      timestamp = acceleratingThrow(detector, timestamp, THROW_END_X);
-    }
+    timestamp = repeatThrowUntilPostRoll(detector, timestamp);
     const { timestamp: afterEmit } = emitThrow(detector, timestamp);
 
     expect(detector.isArmed()).toBe(false);
@@ -530,7 +557,7 @@ describe('ThrowDetector', () => {
       detector.addSample(poseSample(afterEmit, 0.98, 0.35)),
     ).toBeNull();
 
-    timestamp = settleAt(detector, afterEmit, THROW_END_X, 10);
+    timestamp = settleAt(detector, afterEmit, THROW_PEAK_WRIST, 10);
     expect(detector.isArmed()).toBe(true);
   });
 
@@ -544,10 +571,7 @@ describe('ThrowDetector', () => {
   it('tracks the highest-speed frame during an accepted throw', () => {
     const detector = new ThrowDetector();
     let timestamp = longPrime(detector, 10_000);
-    timestamp = acceleratingThrow(detector, timestamp);
-    while (!detector.isCollectingPostRoll()) {
-      timestamp = acceleratingThrow(detector, timestamp, 0.98);
-    }
+    timestamp = repeatThrowUntilPostRoll(detector, timestamp);
 
     const { event } = emitThrow(detector, timestamp);
     expect(event.peakSpeed).toBeGreaterThan(0.35);
@@ -594,26 +618,24 @@ describe('ThrowDetector', () => {
   it('finalizes with nearest peak after exact peak frame is evicted', () => {
     const detector = new ThrowDetector();
     let timestamp = longPrime(detector, 10_000);
-    timestamp = acceleratingThrow(detector, timestamp);
+    timestamp = repeatThrowUntilPostRoll(detector, timestamp);
     expect(detector.isCollectingPostRoll()).toBe(true);
 
-    const bufferBefore = detector.getBuffer();
-    const peakSample = bufferBefore.reduce((best, sample) =>
-      sample.wrist.x > best.wrist.x ? sample : best,
-    );
-    floodBufferBeforeFinalize(detector, peakSample.timestamp);
+    const peakTimestamp = detector.getPendingPeakTimestamp();
+    expect(peakTimestamp).not.toBeNull();
+    floodBufferBeforeFinalize(detector, peakTimestamp!);
     expect(detector.isCollectingPostRoll()).toBe(true);
     expect(
       detector
         .getBuffer()
-        .some((sample) => sample.timestamp === peakSample.timestamp),
+        .some((sample) => sample.timestamp === peakTimestamp),
     ).toBe(false);
 
-    const event = detector.advance(peakSample.timestamp + TRACE_AFTER_MS + 1);
+    const event = detector.advance(peakTimestamp! + TRACE_AFTER_MS + 1);
     expect(event).not.toBeNull();
-    expect(event?.timestamp).toBe(peakSample.timestamp);
+    expect(event?.timestamp).toBe(peakTimestamp);
     expect(detector.getBuffer()[event!.peakIndex].timestamp).not.toBe(
-      peakSample.timestamp,
+      peakTimestamp,
     );
   });
 
