@@ -141,6 +141,8 @@ describe('evaluateThrowCandidate', () => {
         peakSpeed: 2.5,
         displacement: 0.04,
         elbowExtension: 20,
+        backswingFlexion: 20,
+        forearmNormalizedSpeed: 15,
       }),
     ).toBe('displacement');
     expect(
@@ -149,6 +151,8 @@ describe('evaluateThrowCandidate', () => {
         displacement: 0.04,
         elbowExtension: 20,
         worldDisplacement: 0.2,
+        backswingFlexion: 20,
+        forearmNormalizedSpeed: 15,
       }),
     ).toBeNull();
     expect(
@@ -173,12 +177,23 @@ describe('evaluateThrowCandidate', () => {
         wristDx: 0.05,
         wristDy: -0.2,
       }),
-    ).toBe('arm_raise');
+    ).toBe('no_throw_shape');
+    expect(
+      evaluateThrowCandidate({
+        peakSpeed: 0.57,
+        displacement: 0.2,
+        elbowExtension: 20,
+        backswingFlexion: 20,
+        forearmNormalizedSpeed: 4,
+      }),
+    ).toBe('peak_speed');
     expect(
       evaluateThrowCandidate({
         peakSpeed: 2.5,
         displacement: 0.2,
         elbowExtension: 20,
+        backswingFlexion: 20,
+        forearmNormalizedSpeed: 15,
       }),
     ).toBeNull();
   });
@@ -205,6 +220,7 @@ describe('evaluateDecelerationThrow', () => {
   it('uses lookback baseline when enough history is present', () => {
     const buffer = [
       poseSample(9_600, 0.5, 0.35),
+      poseSample(9_800, 0.42, 0.48),
       poseSample(9_900, 0.52, 0.35),
       poseSample(10_000, 0.9, 0.35),
     ];
@@ -220,10 +236,11 @@ describe('evaluateDecelerationThrow', () => {
 
   it('falls back to motion-start baselines without lookback history', () => {
     const baseline = poseSample(9_900, 0.52, 0.35);
+    const cocked = poseSample(9_950, 0.42, 0.48);
     const peak = poseSample(10_000, 0.9, 0.35);
     expect(
       evaluateDecelerationThrow({
-        buffer: [baseline, peak],
+        buffer: [baseline, cocked, peak],
         pendingPeak,
         throwBaselineWrist: { x: 0.52, y: 0.35 },
         throwBaselineElbowAngle: sampleElbowAngle(baseline),
@@ -285,6 +302,25 @@ describe('evaluateDecelerationThrow', () => {
         throwBaselineElbowAngle: sampleElbowAngle(extendedBaseline),
       }).type,
     ).toBe('rejected');
+  });
+
+  it('recovers a forward release after a faster cocking peak', () => {
+    const baseline = poseSample(9_700, 0.75, 0.32, 0, 0.5, 0.35);
+    const cocked = poseSample(10_000, 0.52, 0.45, 0, 0.5, 0.5);
+    const released = poseSample(10_040, 0.92, 0.32, 0, 0.5, 0.35);
+
+    expect(
+      evaluateDecelerationThrow({
+        buffer: [baseline, cocked, released],
+        pendingPeak: {
+          speed: 3,
+          timestamp: 10_000,
+          wrist: { x: 0.52, y: 0.45 },
+        },
+        throwBaselineWrist: { x: 0.75, y: 0.32 },
+        throwBaselineElbowAngle: sampleElbowAngle(baseline),
+      }).type,
+    ).toBe('accepted');
   });
 
   it('rejects insufficient elbow extension at deceleration evaluation', () => {

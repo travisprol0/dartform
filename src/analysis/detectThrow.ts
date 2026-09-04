@@ -4,6 +4,17 @@ import type {
 } from './throwingArm';
 import { dist3d } from './geometry';
 
+/**
+ * Throw detection is built around the throwing arm, not a single camera view.
+ *
+ * Image-space wrist speed and "up vs sideways" travel change with stance,
+ * distance to the camera, and whether the thrower is side-on or facing the
+ * lens. A dart throw is instead: elbow cocks then extends, optionally with
+ * wrist speed in forearm-lengths per second (scale-invariant), plus world-Z
+ * travel when the dart is aimed at the camera. That is meant to hold for
+ * left/right hands, close/far setup, and multiple camera angles.
+ */
+
 /** Normalized image-space wrist speed (units per second). */
 export const THROW_SPEED_THRESHOLD = 0.35;
 
@@ -13,7 +24,7 @@ export const MIN_PEAK_SPEED = 1.6;
 /** Wrist must travel at least this far from throw start to peak. */
 export const MIN_THROW_DISPLACEMENT = 0.07;
 
-/** World-space wrist travel (meters) can satisfy displacement when image travel is small. */
+/** World-space wrist travel (meters). Covers throws aimed at the camera, where 2D travel is tiny. */
 export const MIN_WORLD_DISPLACEMENT = 0.08;
 
 /** Elbow must extend by at least this many degrees during the motion. */
@@ -42,11 +53,28 @@ export type ThrowTrace = {
   peakIndex: number;
 };
 
+/**
+ * Minimum backswing (cock) before release, in degrees of elbow flexion.
+ * Uses the thrower's own elbow, so it is not tied to a side-on camera.
+ */
+export const MIN_BACKSWING_FLEXION_DEG = 8;
+
+/**
+ * Cock-then-extend still needs a real whip. Slow uncocking after a pause
+ * at the rear is not a throw (seen as ~0.57 image units/s).
+ */
+export const THROW_SHAPE_MIN_PEAK_SPEED = 1;
+
+/**
+ * Already-cocked snap throw, in forearm-lengths per second.
+ * Dividing by forearm length keeps the bar similar up close or far from the camera.
+ */
+export const SNAP_THROW_NORMALIZED_SPEED = 8;
+
+const SHAPE_LOOKBACK_MS = 1000;
 const WRIST_SMOOTHING_FRAMES = 3;
 const MAX_SAMPLE_GAP_MS = 200;
 const MOTION_SETTLE_FRAMES = 8;
-const ARM_RAISE_UPWARD_MIN = 0.08;
-const ARM_RAISE_SPEED_MAX = 3;
 export const BASELINE_LOOKBACK_MS = 300;
 
 export type PendingPeak = {
@@ -169,16 +197,12 @@ export function evaluateThrowCandidate(params: {
   wristDx?: number;
   wristDy?: number;
   worldDisplacement?: number;
+  backswingFlexion?: number;
+  forearmNormalizedSpeed?: number;
 }): string | null {
-  if (params.peakSpeed < MIN_PEAK_SPEED) {
+  // Prefer cock-then-extend (any stance) over image-up vs image-side heuristics.
+  if (params.peakSpeed < THROW_SPEED_THRESHOLD) {
     return 'peak_speed';
-  }
-  if (
-    params.displacement < MIN_THROW_DISPLACEMENT &&
-    (params.worldDisplacement === undefined ||
-      params.worldDisplacement < MIN_WORLD_DISPLACEMENT)
-  ) {
-    return 'displacement';
   }
   if (params.elbowExtension < MAX_COCKING_FLEXION_DEG) {
     return 'cocking_flexion';
@@ -186,14 +210,28 @@ export function evaluateThrowCandidate(params: {
   if (params.elbowExtension < MIN_ELBOW_EXTENSION_DEG) {
     return 'elbow_extension';
   }
+  const throwShape =
+    (params.backswingFlexion ?? 0) >= MIN_BACKSWING_FLEXION_DEG &&
+    params.elbowExtension >= MIN_ELBOW_EXTENSION_DEG;
   if (
-    params.wristDx !== undefined &&
-    params.wristDy !== undefined &&
-    params.peakSpeed < ARM_RAISE_SPEED_MAX
+    !throwShape &&
+    (params.forearmNormalizedSpeed ?? 0) < SNAP_THROW_NORMALIZED_SPEED
   ) {
-    const upward = -params.wristDy;
-    if (upward >= ARM_RAISE_UPWARD_MIN && upward > Math.abs(params.wristDx)) {
-      return 'arm_raise';
+    return params.peakSpeed < MIN_PEAK_SPEED
+      ? 'peak_speed'
+      : 'no_throw_shape';
+  }
+  if (throwShape && params.peakSpeed < THROW_SHAPE_MIN_PEAK_SPEED) {
+    return 'peak_speed';
+  }
+  if (params.displacement < MIN_THROW_DISPLACEMENT) {
+    const worldHelpsFacingCamera =
+      params.worldDisplacement !== undefined &&
+      params.worldDisplacement >= MIN_WORLD_DISPLACEMENT &&
+      params.peakSpeed >= MIN_PEAK_SPEED &&
+      params.displacement >= 0.04;
+    if (!worldHelpsFacingCamera) {
+      return 'displacement';
     }
   }
   return null;
@@ -216,20 +254,93 @@ export function findNearestTracePeakIndex(
   return newPeakIndex;
 }
 
+function frameSpeed(previous: PoseSample, next: PoseSample): number {
+  const dt = (next.timestamp - previous.timestamp) / 1000;
+  if (dt <= 0) {
+    return 0;
+  }
+  return (
+    Math.hypot(
+      next.wrist.x - previous.wrist.x,
+      next.wrist.y - previous.wrist.y,
+    ) / dt
+  );
+}
+
+function forearmLength(sample: PoseSample): number {
+  // Image-unit forearm; used so speed is comparable at different camera distances.
+  return Math.max(
+    Math.hypot(
+      sample.wrist.x - sample.elbow.x,
+      sample.wrist.y - sample.elbow.y,
+    ),
+    1e-6,
+  );
+}
+
+function measureThrowShape(
+  buffer: PoseSample[],
+  peakIndex: number,
+): { backswingFlexion: number; forwardExtension: number } {
+  // Cock-then-extend from elbow angle, independent of which way the player faces.
+  const peakTime = buffer[peakIndex].timestamp;
+  let startIndex = peakIndex;
+  while (
+    startIndex > 0 &&
+    peakTime - buffer[startIndex - 1].timestamp <= SHAPE_LOOKBACK_MS
+  ) {
+    startIndex -= 1;
+  }
+  let minElbow = Infinity;
+  for (let index = startIndex; index <= peakIndex; index++) {
+    minElbow = Math.min(minElbow, sampleElbowAngle(buffer[index]));
+  }
+  const startElbow = sampleElbowAngle(buffer[startIndex]);
+  const peakElbow = sampleElbowAngle(buffer[peakIndex]);
+  return {
+    backswingFlexion: startElbow - minElbow,
+    forwardExtension: peakElbow - minElbow,
+  };
+}
+
+function findForwardReleasePeak(
+  buffer: PoseSample[],
+  cockingPeakIndex: number,
+  baselineElbowAngle: number,
+): { index: number; speed: number } | null {
+  let bestIndex = -1;
+  let bestSpeed = 0;
+  for (let index = cockingPeakIndex + 1; index < buffer.length; index++) {
+    const speed = frameSpeed(buffer[index - 1], buffer[index]);
+    const extension =
+      sampleElbowAngle(buffer[index]) - baselineElbowAngle;
+    if (
+      extension >= MIN_ELBOW_EXTENSION_DEG &&
+      speed >= THROW_SPEED_THRESHOLD &&
+      speed > bestSpeed
+    ) {
+      bestSpeed = speed;
+      bestIndex = index;
+    }
+  }
+  if (bestIndex < 0) {
+    return null;
+  }
+  return { index: bestIndex, speed: bestSpeed };
+}
+
 export function evaluateDecelerationThrow(params: {
   buffer: PoseSample[];
   pendingPeak: PendingPeak;
   throwBaselineWrist: { x: number; y: number } | null;
   throwBaselineElbowAngle: number | null;
+  skipCockingRecovery?: boolean;
 }): DecelerationOutcome {
   const peakIndex = resolveThrowPeakIndex(
     params.buffer,
     params.pendingPeak.timestamp,
   );
   if (peakIndex < 0) {
-    // #region agent log
-    fetch('http://127.0.0.1:7778/ingest/243a2c52-e675-4a00-ac2e-6c44421b6c3b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9fcd96'},body:JSON.stringify({sessionId:'9fcd96',runId:'missed-throws',hypothesisId:'D',location:'detectThrow.ts:evaluateDecelerationThrow',message:'missing peak frame',data:{peakTimestamp:params.pendingPeak.timestamp,bufferLength:params.buffer.length},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return { type: 'missing_peak' };
   }
 
@@ -258,6 +369,9 @@ export function evaluateDecelerationThrow(params: {
     baselineElbowAngle !== null
       ? peakElbowAngle - baselineElbowAngle
       : 0;
+  const shape = measureThrowShape(params.buffer, peakIndex);
+  const forearmNormalizedSpeed =
+    params.pendingPeak.speed / forearmLength(peakSample);
 
   const wristDx = baselineWrist ? peakWrist.x - baselineWrist.x : 0;
   const wristDy = baselineWrist ? peakWrist.y - baselineWrist.y : 0;
@@ -272,11 +386,36 @@ export function evaluateDecelerationThrow(params: {
     wristDx,
     wristDy,
     worldDisplacement,
+    backswingFlexion: shape.backswingFlexion,
+    forearmNormalizedSpeed,
   });
 
-  // #region agent log
-  fetch('http://127.0.0.1:7778/ingest/243a2c52-e675-4a00-ac2e-6c44421b6c3b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9fcd96'},body:JSON.stringify({sessionId:'9fcd96',runId:'missed-throws',hypothesisId:rejectReason==='peak_speed'?'A':rejectReason==='arm_raise'?'B':rejectReason?'C':'E',location:'detectThrow.ts:evaluateDecelerationThrow',message:'candidate evaluated',data:{peakIndex,peakSpeed:params.pendingPeak.speed,minPeak:MIN_PEAK_SPEED,displacement,elbowExtension,wristDx,wristDy,upward: -wristDy,rejectReason,outcome:rejectReason?'rejected':'accepted'},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
+  if (
+    (rejectReason === 'cocking_flexion' ||
+      rejectReason === 'elbow_extension') &&
+    !params.skipCockingRecovery &&
+    baselineElbowAngle !== null
+  ) {
+    const release = findForwardReleasePeak(
+      params.buffer,
+      peakIndex,
+      baselineElbowAngle,
+    );
+    if (release) {
+      const releaseSample = params.buffer[release.index];
+      return evaluateDecelerationThrow({
+        buffer: params.buffer,
+        pendingPeak: {
+          speed: release.speed,
+          timestamp: releaseSample.timestamp,
+          wrist: { x: releaseSample.wrist.x, y: releaseSample.wrist.y },
+        },
+        throwBaselineWrist: params.throwBaselineWrist,
+        throwBaselineElbowAngle: params.throwBaselineElbowAngle,
+        skipCockingRecovery: true,
+      });
+    }
+  }
 
   if (rejectReason) {
     return { type: 'rejected' };
@@ -408,11 +547,6 @@ export class ThrowDetector {
     }
 
     if (!detectionEnabled) {
-      if (speed >= THROW_SPEED_THRESHOLD) {
-        // #region agent log
-        fetch('http://127.0.0.1:7778/ingest/243a2c52-e675-4a00-ac2e-6c44421b6c3b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9fcd96'},body:JSON.stringify({sessionId:'9fcd96',runId:'missed-throws',hypothesisId:'D',location:'detectThrow.ts:addSample',message:'motion while detection disabled',data:{speed},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-      }
       this.resetMotionCandidate();
       return null;
     }
@@ -422,11 +556,6 @@ export class ThrowDetector {
     }
 
     if (now - this.lastThrowAt < THROW_LOCKOUT_MS) {
-      if (speed >= MIN_PEAK_SPEED) {
-        // #region agent log
-        fetch('http://127.0.0.1:7778/ingest/243a2c52-e675-4a00-ac2e-6c44421b6c3b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9fcd96'},body:JSON.stringify({sessionId:'9fcd96',runId:'missed-throws',hypothesisId:'D',location:'detectThrow.ts:addSample',message:'throw-speed motion during lockout',data:{speed,msSinceLastThrow:now-this.lastThrowAt,lockoutMs:THROW_LOCKOUT_MS},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-      }
       return null;
     }
 

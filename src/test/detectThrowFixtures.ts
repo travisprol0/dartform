@@ -47,6 +47,19 @@ export function acceleratingThrow(
   elbowX = 0.5,
   elbowY = 0.5,
 ): number {
+  for (let frame = 1; frame <= 4; frame++) {
+    detector.addSample(
+      poseSample(
+        timestamp,
+        0.5 - 0.03 * frame,
+        0.35 + 0.025 * frame,
+        0,
+        elbowX,
+        elbowY,
+      ),
+    );
+    timestamp += FRAME_MS;
+  }
   for (let frame = 1; frame <= 8; frame++) {
     detector.addSample(
       poseSample(timestamp, acceleratingWristX(frame), 0.35, 0, elbowX, elbowY),

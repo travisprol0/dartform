@@ -248,9 +248,6 @@ export function usePoseCamera({
           }
         : capturedMetrics;
       dartMetricsRef.current.push(metrics);
-      // #region agent log
-      fetch('http://127.0.0.1:7778/ingest/243a2c52-e675-4a00-ac2e-6c44421b6c3b',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9fcd96'},body:JSON.stringify({sessionId:'9fcd96',runId:'missed-throws',hypothesisId:'E',location:'usePoseCamera.ts:recordThrow',message:'throw recorded',data:{dartNumber,analysisStatus:metrics.analysisStatus,peakSpeed:metrics.peakSpeed},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       setDartCount(dartNumber);
       setLastDart(metrics);
       setCollectingPostRoll(false);
