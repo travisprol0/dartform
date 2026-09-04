@@ -760,19 +760,14 @@ describe('ThrowDetector', () => {
     let timestamp = shortPrime(detector, 10_000);
 
     for (let frame = 1; frame <= 8; frame++) {
-      const sample =
-        frame === 4
-          ? degenerateElbowSample(timestamp)
-          : poseSample(timestamp, 0.5 + frame * 0.05, 0.35);
+      const sample = degenerateElbowSample(timestamp);
       detector.addSample({
         ...sample,
         wrist: { ...sample.wrist, x: 0.5 + frame * 0.05 },
       });
       timestamp += FRAME_MS;
     }
-    detector.addSample(poseSample(timestamp, 0.55, 0.35));
-    timestamp += FRAME_MS;
-    decelerateToRest(detector, timestamp, 0.55);
+    timestamp = decelerateToRest(detector, timestamp, 0.9, 0.2, 16);
     expect(detector.isCollectingPostRoll()).toBe(false);
   });
 
@@ -859,5 +854,102 @@ describe('extractThrowTrace', () => {
     const trace = extractThrowTrace(buffer, 1);
     expect(trace.peakIndex).toBe(1);
     expect(trace.samples[trace.peakIndex].timestamp).toBe(peakTime + 5);
+  });
+
+  it('keeps a throw candidate while detection is briefly disabled', () => {
+    const detector = new ThrowDetector();
+    let timestamp = longPrime(detector, 10_000);
+    timestamp = acceleratingThrow(
+      detector,
+      timestamp,
+      THROW_PEAK_WRIST,
+      0.5,
+      0.5,
+      0,
+    );
+    expect(detector.isCollectingPostRoll()).toBe(false);
+
+    for (let frame = 0; frame < 8; frame++) {
+      expect(
+        detector.addSample(
+          poseSample(timestamp, THROW_PEAK_WRIST.x, THROW_PEAK_WRIST.y),
+          false,
+        ),
+      ).toBeNull();
+      timestamp += FRAME_MS;
+    }
+    expect(detector.isCollectingPostRoll()).toBe(false);
+
+    detector.addSample(
+      poseSample(timestamp, THROW_PEAK_WRIST.x, THROW_PEAK_WRIST.y),
+      true,
+    );
+    expect(detector.isCollectingPostRoll()).toBe(true);
+  });
+
+  it('allows a 220ms gap after slow frames without splitting history', () => {
+    const detector = new ThrowDetector();
+    const wrist = forearmWrist(25);
+    let timestamp = 10_000;
+    for (let frame = 0; frame < 12; frame++) {
+      detector.addSample(poseSample(timestamp, wrist.x, wrist.y), false);
+      timestamp += 100;
+    }
+
+    detector.addSample(poseSample(timestamp - 100 + 220, wrist.x, wrist.y), false);
+    expect(detector.getRecentContinuousDurationMs()).toBeGreaterThan(1000);
+  });
+
+  it('still splits history when a gap exceeds the adaptive ceiling', () => {
+    const detector = new ThrowDetector();
+    const wrist = forearmWrist(25);
+    let timestamp = 10_000;
+    for (let frame = 0; frame < 12; frame++) {
+      detector.addSample(poseSample(timestamp, wrist.x, wrist.y), false);
+      timestamp += 100;
+    }
+
+    detector.addSample(poseSample(timestamp - 100 + 400, wrist.x, wrist.y), false);
+    expect(detector.getRecentContinuousDurationMs()).toBe(0);
+  });
+
+  it('ignores a non-positive timestamp delta', () => {
+    const detector = new ThrowDetector();
+    detector.addSample(poseSample(10_000, 0.5, 0.35));
+    expect(detector.addSample(poseSample(10_000, 0.55, 0.35))).toBeNull();
+    expect(detector.getCurrentWristSpeed()).toBe(0);
+    expect(detector.getRecentContinuousDurationMs()).toBe(0);
+  });
+
+  it('still measures image speed across an adaptive gap', () => {
+    const detector = new ThrowDetector();
+    let timestamp = 10_000;
+    detector.addSample(
+      withoutWorld(poseSample(timestamp, 0.5, 0.5, 0, 0.5, 0.5)),
+      false,
+    );
+    for (let frame = 0; frame < 10; frame++) {
+      timestamp += 100;
+      detector.addSample(
+        withoutWorld(poseSample(timestamp, 0.5, 0.5, 0, 0.5, 0.5)),
+        false,
+      );
+    }
+    timestamp += 220;
+    detector.addSample(
+      withoutWorld(poseSample(timestamp, 0.7, 0.5, 0, 0.5, 0.5)),
+      false,
+    );
+    expect(detector.getCurrentWristSpeed()).toBeGreaterThan(0.4);
+  });
+
+  it('does not let a huge stall raise the adaptive gap floor', () => {
+    const detector = new ThrowDetector();
+    detector.addSample(poseSample(10_000, 0.5, 0.35));
+    detector.addSample(poseSample(10_033, 0.5, 0.35));
+    detector.addSample(poseSample(10_033 + 2500, 0.5, 0.35));
+    expect(detector.getRecentContinuousDurationMs()).toBe(0);
+    detector.addSample(poseSample(10_033 + 2500 + 220, 0.5, 0.35));
+    expect(detector.getRecentContinuousDurationMs()).toBe(0);
   });
 });

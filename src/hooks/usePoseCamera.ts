@@ -11,6 +11,11 @@ import {
 } from '../analysis/roundMetrics';
 import { getTrackedPoseLandmarks } from '../analysis/throwingArm';
 import type { PoseLandmark } from '../analysis/throwingArm';
+import { paintPoseOverlay } from '../analysis/poseDrawing';
+import {
+  captureVideoIdeal,
+  prefersCoarsePointer,
+} from '../pose/cameraConstraints';
 import {
   createPoseLandmarker,
   type PoseDelegate,
@@ -35,6 +40,7 @@ const ARM_LOST_FRAMES_BEFORE_RESET = 4;
 const ROUND_ACTIVE_MIN_VISIBILITY = 0.5;
 const FEEDBACK_GLANCE_MS = 2600;
 const ROUND_COMPLETE_GLANCE_MS = 2200;
+const HUD_THROTTLE_MS = 100;
 
 const WASM_CDN =
   'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm';
@@ -64,6 +70,7 @@ export function usePoseCamera({
   onRoundComplete,
 }: UsePoseCameraOptions) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [dartCount, setDartCount] = useState(0);
@@ -75,7 +82,6 @@ export function usePoseCamera({
   const [wristSpeed, setWristSpeed] = useState(0);
   const [lastDart, setLastDart] = useState<DartMetrics | null>(null);
   const [previousDart, setPreviousDart] = useState<DartMetrics | null>(null);
-  const [poseLandmarks, setPoseLandmarks] = useState<PoseLandmark[] | null>(null);
   const [armTracked, setArmTracked] = useState(false);
   const [collectingPostRoll, setCollectingPostRoll] = useState(false);
   const [detectorArmed, setDetectorArmed] = useState(true);
@@ -95,6 +101,22 @@ export function usePoseCamera({
   const rafRef = useRef(0);
   const streamRef = useRef<MediaStream | null>(null);
   const feedbackTimeoutRef = useRef<number | null>(null);
+  const lastDebugHudAtRef = useRef(0);
+  const overlayPaintRef = useRef<{
+    landmarks: PoseLandmark[] | null;
+    armTracked: boolean;
+    armStable: boolean;
+  }>({ landmarks: null, armTracked: false, armStable: false });
+  const hudRefs = useRef({
+    landmarkCount: 0,
+    inferenceTimeMs: 0,
+    armVisible: false,
+    armTracked: false,
+    collectingPostRoll: false,
+    detectorArmed: true,
+    stableFrameCount: 0,
+    wristSpeed: 0,
+  });
 
   onRoundCompleteRef.current = onRoundComplete;
 
@@ -116,11 +138,26 @@ export function usePoseCamera({
     stableFrameCountRef.current = 0;
     lostFrameCountRef.current = 0;
     armWasStableRef.current = false;
+    overlayPaintRef.current = {
+      landmarks: null,
+      armTracked: false,
+      armStable: false,
+    };
+    lastDebugHudAtRef.current = 0;
+    hudRefs.current = {
+      landmarkCount: 0,
+      inferenceTimeMs: 0,
+      armVisible: false,
+      armTracked: false,
+      collectingPostRoll: false,
+      detectorArmed: true,
+      stableFrameCount: 0,
+      wristSpeed: 0,
+    };
     setStableFrameCount(0);
     setWristSpeed(0);
     setLastDart(null);
     setPreviousDart(null);
-    setPoseLandmarks(null);
     setArmTracked(false);
     setCollectingPostRoll(false);
     setDetectorArmed(true);
@@ -156,11 +193,12 @@ export function usePoseCamera({
       }
 
       try {
+        const ideal = captureVideoIdeal(prefersCoarsePointer());
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode,
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            width: { ideal: ideal.width },
+            height: { ideal: ideal.height },
           },
           audio: false,
         });
@@ -230,6 +268,81 @@ export function usePoseCamera({
       return;
     }
 
+    const paintOverlay = (
+      landmarks: PoseLandmark[] | null,
+      armTrackedFlag: boolean,
+      armStableFlag: boolean,
+    ) => {
+      overlayPaintRef.current = {
+        landmarks,
+        armTracked: armTrackedFlag,
+        armStable: armStableFlag,
+      };
+      const canvas = overlayCanvasRef.current;
+      const video = videoRef.current;
+      if (!canvas || !video) {
+        return;
+      }
+      paintPoseOverlay(canvas, video, landmarks, {
+        throwingHand,
+        armTracked: armTrackedFlag,
+        armStable: armStableFlag,
+      }, window.devicePixelRatio || 1);
+    };
+
+    const publishHud = (
+      now: number,
+      snapshot: {
+        landmarkCount: number;
+        inferenceTimeMs: number;
+        armVisible: boolean;
+        armTracked: boolean;
+        collectingPostRoll: boolean;
+        detectorArmed: boolean;
+        stableFrameCount: number;
+        wristSpeed: number;
+      },
+    ) => {
+      const previous = hudRefs.current;
+      if (previous.armVisible !== snapshot.armVisible) {
+        previous.armVisible = snapshot.armVisible;
+        setArmVisible(snapshot.armVisible);
+      }
+      if (previous.armTracked !== snapshot.armTracked) {
+        previous.armTracked = snapshot.armTracked;
+        setArmTracked(snapshot.armTracked);
+      }
+      if (previous.collectingPostRoll !== snapshot.collectingPostRoll) {
+        previous.collectingPostRoll = snapshot.collectingPostRoll;
+        setCollectingPostRoll(snapshot.collectingPostRoll);
+      }
+      if (previous.detectorArmed !== snapshot.detectorArmed) {
+        previous.detectorArmed = snapshot.detectorArmed;
+        setDetectorArmed(snapshot.detectorArmed);
+      }
+
+      if (now - lastDebugHudAtRef.current < HUD_THROTTLE_MS) {
+        return;
+      }
+      lastDebugHudAtRef.current = now;
+      if (previous.landmarkCount !== snapshot.landmarkCount) {
+        previous.landmarkCount = snapshot.landmarkCount;
+        setLandmarkCount(snapshot.landmarkCount);
+      }
+      if (previous.inferenceTimeMs !== snapshot.inferenceTimeMs) {
+        previous.inferenceTimeMs = snapshot.inferenceTimeMs;
+        setInferenceTimeMs(snapshot.inferenceTimeMs);
+      }
+      if (previous.stableFrameCount !== snapshot.stableFrameCount) {
+        previous.stableFrameCount = snapshot.stableFrameCount;
+        setStableFrameCount(snapshot.stableFrameCount);
+      }
+      if (previous.wristSpeed !== snapshot.wristSpeed) {
+        previous.wristSpeed = snapshot.wristSpeed;
+        setWristSpeed(snapshot.wristSpeed);
+      }
+    };
+
     const recordThrow = (throwEvent: ThrowEvent) => {
       const buffer = throwDetectorRef.current.getBuffer();
       const dartNumber = dartMetricsRef.current.length + 1;
@@ -262,8 +375,16 @@ export function usePoseCamera({
       dartMetricsRef.current.push(metrics);
       setDartCount(dartNumber);
       setLastDart(metrics);
-      setCollectingPostRoll(false);
-      setDetectorArmed(throwDetectorRef.current.isArmed());
+      publishHud(performance.now(), {
+        landmarkCount: hudRefs.current.landmarkCount,
+        inferenceTimeMs: hudRefs.current.inferenceTimeMs,
+        armVisible: hudRefs.current.armVisible,
+        armTracked: hudRefs.current.armTracked,
+        collectingPostRoll: false,
+        detectorArmed: throwDetectorRef.current.isArmed(),
+        stableFrameCount: hudRefs.current.stableFrameCount,
+        wristSpeed: hudRefs.current.wristSpeed,
+      });
 
       if (dartNumber >= DARTS_PER_ROUND) {
         roundCompleteRef.current = true;
@@ -318,8 +439,6 @@ export function usePoseCamera({
       }
 
       const collecting = detector.isCollectingPostRoll();
-      setCollectingPostRoll(collecting);
-      setDetectorArmed(detector.isArmed());
       lostFrameCountRef.current += 1;
       if (
         lostFrameCountRef.current === ARM_LOST_FRAMES_BEFORE_RESET
@@ -328,16 +447,22 @@ export function usePoseCamera({
         if (!roundInProgress && !collecting) {
           armWasStableRef.current = false;
           detector.reset();
-          setDetectorArmed(true);
         }
       } else if (
         lostFrameCountRef.current > ARM_LOST_FRAMES_BEFORE_RESET
       ) {
         stableFrameCountRef.current = 0;
       }
-      setStableFrameCount(stableFrameCountRef.current);
-      setArmVisible(false);
-      setWristSpeed(0);
+      publishHud(now, {
+        landmarkCount: hudRefs.current.landmarkCount,
+        inferenceTimeMs: hudRefs.current.inferenceTimeMs,
+        armVisible: false,
+        armTracked: false,
+        collectingPostRoll: collecting,
+        detectorArmed: detector.isArmed(),
+        stableFrameCount: stableFrameCountRef.current,
+        wristSpeed: 0,
+      });
     };
 
     const detect = () => {
@@ -351,13 +476,20 @@ export function usePoseCamera({
       const heartbeatDetector = throwDetectorRef.current;
       if (heartbeatDetector.isCollectingPostRoll()) {
         const finalizedThrow = heartbeatDetector.advance(now);
-        setCollectingPostRoll(
-          heartbeatDetector.isCollectingPostRoll(),
-        );
         if (finalizedThrow) {
           recordThrow(finalizedThrow);
           return;
         }
+        publishHud(now, {
+          landmarkCount: hudRefs.current.landmarkCount,
+          inferenceTimeMs: hudRefs.current.inferenceTimeMs,
+          armVisible: hudRefs.current.armVisible,
+          armTracked: hudRefs.current.armTracked,
+          collectingPostRoll: heartbeatDetector.isCollectingPostRoll(),
+          detectorArmed: heartbeatDetector.isArmed(),
+          stableFrameCount: hudRefs.current.stableFrameCount,
+          wristSpeed: hudRefs.current.wristSpeed,
+        });
       }
 
       const video = videoRef.current;
@@ -373,7 +505,7 @@ export function usePoseCamera({
 
       const start = performance.now();
       const result = landmarker.detectForVideo(video, now);
-      setInferenceTimeMs(performance.now() - start);
+      const inferenceTimeMs = performance.now() - start;
 
       const pose = result.landmarks[0];
       const dartsRecorded = dartMetricsRef.current.length;
@@ -381,32 +513,46 @@ export function usePoseCamera({
         dartsRecorded > 0 && !roundCompleteRef.current;
 
       if (!pose?.length) {
-        setLandmarkCount(0);
-        setPoseLandmarks(null);
-        setArmTracked(false);
+        paintOverlay(null, false, false);
         handleMissingArm(now, roundInProgress);
+        publishHud(now, {
+          landmarkCount: 0,
+          inferenceTimeMs,
+          armVisible: false,
+          armTracked: false,
+          collectingPostRoll: hudRefs.current.collectingPostRoll,
+          detectorArmed: hudRefs.current.detectorArmed,
+          stableFrameCount: stableFrameCountRef.current,
+          wristSpeed: 0,
+        });
         return;
       }
-
-      setLandmarkCount(pose.length);
-      setPoseLandmarks(pose);
 
       const trackedPose = getTrackedPoseLandmarks(
         pose,
         throwingHand,
         roundInProgress ? { minVisibility: ROUND_ACTIVE_MIN_VISIBILITY } : undefined,
       );
-      setArmTracked(trackedPose !== null);
 
       if (!trackedPose) {
+        paintOverlay(pose, false, false);
         handleMissingArm(now, roundInProgress);
+        publishHud(now, {
+          landmarkCount: pose.length,
+          inferenceTimeMs,
+          armVisible: false,
+          armTracked: false,
+          collectingPostRoll: hudRefs.current.collectingPostRoll,
+          detectorArmed: hudRefs.current.detectorArmed,
+          stableFrameCount: stableFrameCountRef.current,
+          wristSpeed: 0,
+        });
         return;
       }
 
       lostFrameCountRef.current = 0;
       stableFrameCountRef.current += 1;
       const stableCount = stableFrameCountRef.current;
-      setStableFrameCount(stableCount);
 
       const stableThreshold = armWasStableRef.current
         ? REACQUIRE_STABLE_FRAMES
@@ -449,16 +595,23 @@ export function usePoseCamera({
       const throwEvent = detector.addSample(sample, canDetectThrow);
       const collecting = detector.isCollectingPostRoll();
       const armed = detector.isArmed();
-      setCollectingPostRoll(collecting);
-      setDetectorArmed(armed);
       const isReady =
         isArmStable &&
         (detector.getRecentContinuousDurationMs() >= MIN_READY_BUFFER_MS ||
           detector.isPrimed()) &&
         armed &&
         !collecting;
-      setArmVisible(isReady);
-      setWristSpeed(throwDetectorRef.current.getCurrentWristSpeed());
+      paintOverlay(pose, true, isReady);
+      publishHud(now, {
+        landmarkCount: pose.length,
+        inferenceTimeMs,
+        armVisible: isReady,
+        armTracked: true,
+        collectingPostRoll: collecting,
+        detectorArmed: armed,
+        stableFrameCount: stableCount,
+        wristSpeed: detector.getCurrentWristSpeed(),
+      });
 
       if (throwEvent) {
         recordThrow(throwEvent);
@@ -467,8 +620,21 @@ export function usePoseCamera({
 
     rafRef.current = requestAnimationFrame(detect);
 
+    const video = videoRef.current;
+    const resizeObserver =
+      video && typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            const last = overlayPaintRef.current;
+            paintOverlay(last.landmarks, last.armTracked, last.armStable);
+          })
+        : null;
+    if (video && resizeObserver) {
+      resizeObserver.observe(video);
+    }
+
     return () => {
       cancelAnimationFrame(rafRef.current);
+      resizeObserver?.disconnect();
       if (feedbackTimeoutRef.current !== null) {
         window.clearTimeout(feedbackTimeoutRef.current);
         feedbackTimeoutRef.current = null;
@@ -478,6 +644,7 @@ export function usePoseCamera({
 
   return {
     videoRef,
+    overlayCanvasRef,
     cameraError,
     loading,
     dartCount,
@@ -485,7 +652,6 @@ export function usePoseCamera({
     landmarkCount,
     inferenceTimeMs,
     armVisible,
-    poseLandmarks,
     armTracked,
     collectingPostRoll,
     detectorArmed,

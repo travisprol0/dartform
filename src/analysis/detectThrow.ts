@@ -66,8 +66,13 @@ export const SNAP_THROW_NORMALIZED_SPEED = 8;
 
 const SHAPE_LOOKBACK_MS = 1000;
 const WRIST_SMOOTHING_FRAMES = 3;
-const MAX_SAMPLE_GAP_MS = 200;
-const MOTION_SETTLE_FRAMES = 8;
+/** Floor for a dropped-frame gap; slower phones can raise this via recent dt. */
+export const BASE_MAX_SAMPLE_GAP_MS = 200;
+const SAMPLE_GAP_MEDIAN_WINDOW = 8;
+const SAMPLE_GAP_MULTIPLIER = 2.5;
+const MAX_RECORDED_GAP_MS = 2000;
+/** Quiet time after peak speed before validating the throw (not frame-count). */
+export const MOTION_SETTLE_MS = 200;
 export const BASELINE_LOOKBACK_MS = 300;
 
 export type WristPoint = {
@@ -537,7 +542,9 @@ export class ThrowDetector {
 
   private primed = false;
 
-  private quietFrames = 0;
+  private quietSince: number | null = null;
+
+  private recentGaps: number[] = [];
 
   private smoothWrist(wrist: WristPoint): WristPoint {
     this.wristHistory.push(wrist);
@@ -571,7 +578,26 @@ export class ThrowDetector {
     this.pendingPeak = null;
     this.throwBaselineWrist = null;
     this.throwBaselineElbowAngle = null;
-    this.quietFrames = 0;
+    this.quietSince = null;
+  }
+
+  private recordGap(gapMs: number): void {
+    if (gapMs <= 0 || gapMs >= MAX_RECORDED_GAP_MS) {
+      return;
+    }
+    this.recentGaps.push(gapMs);
+    if (this.recentGaps.length > SAMPLE_GAP_MEDIAN_WINDOW) {
+      this.recentGaps.shift();
+    }
+  }
+
+  private maxSampleGapMs(): number {
+    if (this.recentGaps.length < 3) {
+      return BASE_MAX_SAMPLE_GAP_MS;
+    }
+    const sorted = [...this.recentGaps].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    return Math.max(BASE_MAX_SAMPLE_GAP_MS, SAMPLE_GAP_MULTIPLIER * median);
   }
 
   private finalizePendingThrow(now: number): ThrowEvent | null {
@@ -636,8 +662,10 @@ export class ThrowDetector {
     const now = sample.timestamp;
     const gapMs = now - previousSampleAt;
     const dt = gapMs / 1000;
+    this.recordGap(gapMs);
+    const maxGapMs = this.maxSampleGapMs();
     let speed = 0;
-    if (dt > 0 && gapMs <= MAX_SAMPLE_GAP_MS) {
+    if (dt > 0 && gapMs <= maxGapMs) {
       if (hasWorld && previousHadWorld) {
         speed = dist3d(previousWrist, smoothedWrist) / dt;
       } else {
@@ -656,11 +684,6 @@ export class ThrowDetector {
       return finalizedThrow;
     }
 
-    if (!detectionEnabled) {
-      this.resetMotionCandidate();
-      return null;
-    }
-
     if (this.pendingThrow) {
       return null;
     }
@@ -669,7 +692,7 @@ export class ThrowDetector {
       return null;
     }
 
-    if (dt <= 0 || gapMs > MAX_SAMPLE_GAP_MS) {
+    if (dt <= 0 || gapMs > maxGapMs) {
       this.resetMotionCandidate();
       this.wristHistory = [rawWrist];
       this.previousSmoothedWrist = rawWrist;
@@ -681,7 +704,7 @@ export class ThrowDetector {
         this.throwBaselineWrist = smoothedWrist;
         this.throwBaselineElbowAngle = sampleElbowAngle(smoothedSample);
       }
-      this.quietFrames = 0;
+      this.quietSince = null;
       if (!this.pendingPeak || speed > this.pendingPeak.speed) {
         this.pendingPeak = {
           speed,
@@ -694,12 +717,17 @@ export class ThrowDetector {
     }
 
     if (this.wasAboveThreshold && this.pendingPeak) {
-      this.quietFrames += 1;
-      if (this.quietFrames < MOTION_SETTLE_FRAMES) {
+      if (this.quietSince === null) {
+        this.quietSince = now;
+      }
+      if (now - this.quietSince < MOTION_SETTLE_MS) {
+        return null;
+      }
+      if (!detectionEnabled) {
         return null;
       }
       this.wasAboveThreshold = false;
-      this.quietFrames = 0;
+      this.quietSince = null;
 
       const outcome = evaluateDecelerationThrow({
         buffer: this.buffer,
@@ -750,7 +778,7 @@ export class ThrowDetector {
     for (let index = lastIndex; index > 0; index--) {
       const gap =
         this.buffer[index].timestamp - this.buffer[index - 1].timestamp;
-      if (gap > MAX_SAMPLE_GAP_MS || gap <= 0) {
+        if (gap > this.maxSampleGapMs() || gap <= 0) {
         break;
       }
       startIndex = index - 1;
@@ -793,7 +821,8 @@ export class ThrowDetector {
     this.throwBaselineElbowAngle = null;
     this.currentWristSpeed = 0;
     this.primed = false;
-    this.quietFrames = 0;
+    this.quietSince = null;
+    this.recentGaps = [];
   }
 }
 

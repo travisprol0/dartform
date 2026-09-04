@@ -31,7 +31,7 @@ export function CapturePage({
     wristSpeed,
     lastDart,
     previousDart,
-    poseLandmarks,
+    overlayCanvasRef,
     armTracked,
     collectingPostRoll,
     detectorArmed,
@@ -94,15 +94,7 @@ export function CapturePage({
           autoPlay
         />
 
-        {!loading ? (
-          <PoseOverlay
-            videoRef={videoRef}
-            landmarks={poseLandmarks}
-            throwingHand={throwingHand}
-            armTracked={armTracked}
-            armStable={armVisible}
-          />
-        ) : null}
+        {!loading ? <PoseOverlay ref={overlayCanvasRef} /> : null}
       </div>
 
       <div className="capture__rotate" role="dialog" aria-modal="true">

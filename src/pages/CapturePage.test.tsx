@@ -50,7 +50,7 @@ function stubCamera(overrides: Partial<CameraState> = {}): {
     landmarkCount: 33,
     inferenceTimeMs: 12.5,
     armVisible: false,
-    poseLandmarks: null,
+    overlayCanvasRef: { current: null },
     armTracked: false,
     collectingPostRoll: false,
     detectorArmed: true,
