@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   BUFFER_SIZE,
   MIN_READY_BUFFER_MS,
+  REARM_QUIET_MS,
+  THROW_LOCKOUT_MS,
   TRACE_AFTER_MS,
   TRACE_BEFORE_MS,
   ThrowDetector,
@@ -35,6 +37,7 @@ import {
   poseAtForearmAngle,
   restForMs,
   shortPrime,
+  takeNextDart,
   tinyDisplacementThrow,
   upwardRaise,
   validThrowWithLookback,
@@ -42,19 +45,6 @@ import {
   worldDriftSample,
   worldSwingSample,
 } from '../test/detectThrowFixtures';
-
-function settleAt(
-  detector: ThrowDetector,
-  timestamp: number,
-  wrist = THROW_PEAK_WRIST,
-  frames = 10,
-): number {
-  for (let frame = 0; frame < frames; frame++) {
-    detector.addSample(poseSample(timestamp, wrist.x, wrist.y));
-    timestamp += FRAME_MS;
-  }
-  return timestamp;
-}
 
 function repeatThrowUntilPostRoll(
   detector: ThrowDetector,
@@ -90,6 +80,21 @@ function emitThrow(
     throw new Error('Expected throw event to finalize.');
   }
   return { timestamp: ts, event: emitted };
+}
+
+function restUntilArmed(
+  detector: ThrowDetector,
+  timestamp: number,
+): number {
+  timestamp = restForMs(
+    detector,
+    timestamp,
+    THROW_LOCKOUT_MS + REARM_QUIET_MS,
+  );
+  if (!detector.isArmed()) {
+    throw new Error('Expected detector to re-arm after lockout and quiet.');
+  }
+  return timestamp;
 }
 
 describe('sampleElbowAngle', () => {
@@ -633,9 +638,9 @@ describe('ThrowDetector', () => {
       trace.samples[trace.samples.length - 1].timestamp - peakTime;
     expect(postRoll).toBeGreaterThanOrEqual(TRACE_AFTER_MS - FRAME_MS);
     expect(detector.isCollectingPostRoll()).toBe(false);
-    expect(detector.isArmed()).toBe(true);
+    expect(detector.isArmed()).toBe(false);
 
-    timestamp = settleAt(detector, afterEmit, THROW_PEAK_WRIST, 10);
+    timestamp = restUntilArmed(detector, afterEmit);
     expect(detector.isArmed()).toBe(true);
   });
 
@@ -777,13 +782,14 @@ describe('ThrowDetector', () => {
     timestamp = repeatThrowUntilPostRoll(detector, timestamp);
     const { timestamp: afterEmit } = emitThrow(detector, timestamp);
 
-    expect(detector.isArmed()).toBe(true);
+    expect(detector.isArmed()).toBe(false);
     expect(
       detector.addSample(poseSample(afterEmit, 0.98, 0.35)),
     ).toBeNull();
 
-    timestamp = settleAt(detector, afterEmit, THROW_PEAK_WRIST, 10);
-    expect(detector.isArmed()).toBe(true);
+    timestamp = restUntilArmed(detector, afterEmit);
+    timestamp = acceleratingThrow(detector, timestamp);
+    expect(detector.isCollectingPostRoll()).toBe(true);
   });
 
   it('rejects throws with insufficient wrist travel', () => {
@@ -929,20 +935,20 @@ describe('ThrowDetector', () => {
     expect(detector.getCurrentWristSpeed()).toBe(0);
   });
 
-  it('records two throws about 700ms apart after the first finalizes', () => {
+  it('records two throws after lockout and a quiet re-arm', () => {
     const detector = new ThrowDetector();
     let timestamp = longPrime(detector, 10_000);
     timestamp = acceleratingThrow(detector, timestamp);
     expect(detector.isCollectingPostRoll()).toBe(true);
     const first = emitThrow(detector, timestamp);
-    timestamp = restForMs(detector, first.timestamp, 700);
+    timestamp = restUntilArmed(detector, first.timestamp);
     timestamp = acceleratingThrow(detector, timestamp);
     expect(detector.isCollectingPostRoll()).toBe(true);
     const second = emitThrow(detector, timestamp);
     expect(second.event.timestamp).toBeGreaterThan(first.event.timestamp);
   });
 
-  it('splits a second throw after a speed valley without a full rest', () => {
+  it('keeps one throw when speed valleys mid-stroke', () => {
     const detector = new ThrowDetector();
     const events: ThrowEvent[] = [];
     let timestamp = longPrime(detector, 10_000);
@@ -975,7 +981,45 @@ describe('ThrowDetector', () => {
       0.5,
       events,
     );
-    expect(events.length).toBeGreaterThanOrEqual(2);
+    if (events.length === 0) {
+      const emitted = emitThrow(detector, timestamp);
+      events.push(emitted.event);
+    }
+    expect(events.length).toBe(1);
+  });
+
+  it('does not count taking the next dart as a throw', () => {
+    const detector = new ThrowDetector();
+    const events: ThrowEvent[] = [];
+    let timestamp = longPrime(detector, 10_000);
+    timestamp = acceleratingThrow(
+      detector,
+      timestamp,
+      THROW_PEAK_WRIST,
+      0.5,
+      0.5,
+      10,
+      events,
+    );
+    timestamp = takeNextDart(detector, timestamp, events);
+    if (events.length === 0) {
+      timestamp = takeNextDart(detector, timestamp, events);
+    }
+    expect(events.length).toBe(1);
+    expect(detector.isArmed()).toBe(false);
+    timestamp = restUntilArmed(detector, timestamp);
+    expect(detector.isArmed()).toBe(true);
+  });
+
+  it('stays disarmed until the wrist is quiet after a throw', () => {
+    const detector = new ThrowDetector();
+    let timestamp = longPrime(detector, 10_000);
+    timestamp = acceleratingThrow(detector, timestamp);
+    timestamp = takeNextDart(detector, timestamp);
+    expect(detector.isCollectingPostRoll()).toBe(false);
+    expect(detector.isArmed()).toBe(false);
+    timestamp = restUntilArmed(detector, timestamp);
+    expect(detector.isArmed()).toBe(true);
   });
 
   it('does not treat an upward arm raise after a throw as the next dart', () => {
@@ -983,7 +1027,7 @@ describe('ThrowDetector', () => {
     let timestamp = longPrime(detector, 10_000);
     timestamp = acceleratingThrow(detector, timestamp);
     const { timestamp: afterEmit } = emitThrow(detector, timestamp);
-    timestamp = restForMs(detector, afterEmit, 700);
+    timestamp = restUntilArmed(detector, afterEmit);
     timestamp = upwardRaise(detector, timestamp);
     expect(detector.isCollectingPostRoll()).toBe(false);
   });

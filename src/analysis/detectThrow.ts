@@ -29,7 +29,10 @@ export const MIN_ELBOW_EXTENSION_DEG = 8;
 export const MAX_COCKING_FLEXION_DEG = -20;
 
 /** Ignore new throws for this long after a detection. */
-export const THROW_LOCKOUT_MS = 600;
+export const THROW_LOCKOUT_MS = 1200;
+
+/** Wrist must stay below the speed bar this long before the next dart. */
+export const REARM_QUIET_MS = 300;
 
 /** Ring buffer size (~6 s at ~30 fps). */
 export const BUFFER_SIZE = 180;
@@ -66,15 +69,6 @@ export const SNAP_THROW_NORMALIZED_SPEED = 8;
 
 /** Later darts in a round must reach this fraction of the last accepted peak. */
 export const MIN_RELATIVE_PEAK_RATIO = 0.5;
-
-/** Drop to this fraction of peak speed (while still moving) starts a valley. */
-export const VALLEY_SPEED_RATIO = 0.45;
-
-/** Ignore intra-stroke dips; a second throw is slower than a cock-to-release. */
-export const MIN_VALLEY_SEPARATION_MS = 180;
-
-/** Brief quiet below the speed bar, then a rise, ends the prior throw. */
-export const MIN_RESUME_QUIET_MS = 50;
 
 /** Vertical-only reaches this far, with little forward travel, is a raise. */
 export const ARM_RAISE_UPWARD_MIN_M = 0.08;
@@ -704,7 +698,7 @@ export class ThrowDetector {
 
   private quietSince: number | null = null;
 
-  private sawValley = false;
+  private rearmQuietSince: number | null = null;
 
   private recentGaps: number[] = [];
 
@@ -741,7 +735,6 @@ export class ThrowDetector {
     this.throwBaselineWrist = null;
     this.throwBaselineElbowAngle = null;
     this.quietSince = null;
-    this.sawValley = false;
   }
 
   private acceptThrow(outcome: {
@@ -755,6 +748,7 @@ export class ThrowDetector {
       peakSpeed: outcome.peakSpeed,
     };
     this.armed = false;
+    this.rearmQuietSince = null;
     this.resetMotionCandidate();
   }
 
@@ -773,7 +767,6 @@ export class ThrowDetector {
     this.throwBaselineWrist = null;
     this.throwBaselineElbowAngle = null;
     this.quietSince = null;
-    this.sawValley = false;
     this.wasAboveThreshold = false;
     if (outcome.type !== 'accepted') {
       return false;
@@ -805,9 +798,29 @@ export class ThrowDetector {
     const finalized = resolvePendingThrow(this.buffer, this.pendingThrow, now);
     if (finalized) {
       this.pendingThrow = null;
-      this.armed = true;
     }
     return finalized;
+  }
+
+  private maybeRearm(now: number, speed: number): void {
+    if (this.armed) {
+      return;
+    }
+    if (speed >= THROW_SPEED_THRESHOLD) {
+      this.rearmQuietSince = null;
+      return;
+    }
+    if (this.rearmQuietSince === null) {
+      this.rearmQuietSince = now;
+    }
+    if (
+      this.pendingThrow === null &&
+      now - this.lastThrowAt >= THROW_LOCKOUT_MS &&
+      now - this.rearmQuietSince >= REARM_QUIET_MS
+    ) {
+      this.armed = true;
+      this.rearmQuietSince = null;
+    }
   }
 
   advance(now: number): ThrowEvent | null {
@@ -878,69 +891,31 @@ export class ThrowDetector {
         speed = scaledImageSpeed(imageSpeed, sample);
       }
     }
-    const previousSpeed = this.currentWristSpeed;
     this.currentWristSpeed = speed;
 
     const finalizedThrow = this.finalizePendingThrow(now);
 
     if (dt <= 0 || gapMs > maxGapMs) {
       this.resetMotionCandidate();
+      this.rearmQuietSince = null;
       this.wristHistory = [rawWrist];
       this.previousSmoothedWrist = rawWrist;
       return finalizedThrow;
     }
 
+    this.maybeRearm(now, speed);
+
     const canAccept =
+      this.armed &&
       this.pendingThrow === null &&
       now - this.lastThrowAt >= THROW_LOCKOUT_MS;
 
+    if (!canAccept) {
+      this.resetMotionCandidate();
+      return finalizedThrow;
+    }
+
     if (speed >= THROW_SPEED_THRESHOLD) {
-      const separatedFromPeak =
-        this.pendingPeak !== null &&
-        now - this.pendingPeak.timestamp >= MIN_VALLEY_SEPARATION_MS;
-      const quietDuration =
-        this.quietSince !== null ? now - this.quietSince : 0;
-      const valleyRise =
-        separatedFromPeak &&
-        this.sawValley &&
-        speed > previousSpeed;
-      const resumeAfterQuiet =
-        separatedFromPeak &&
-        this.wasAboveThreshold &&
-        quietDuration >= MIN_RESUME_QUIET_MS &&
-        quietDuration < MOTION_SETTLE_MS;
-      if ((valleyRise || resumeAfterQuiet) && canAccept) {
-        if (!detectionEnabled) {
-          return finalizedThrow;
-        }
-        const accepted = this.considerPendingPeak(true);
-        if (!accepted) {
-          this.quietSince = null;
-          if (!this.pendingPeak || speed > this.pendingPeak.speed) {
-            this.pendingPeak = {
-              speed,
-              timestamp: smoothedSample.timestamp,
-              wrist: smoothedWrist,
-            };
-            this.sawValley = false;
-          } else if (speed <= VALLEY_SPEED_RATIO * this.pendingPeak.speed) {
-            this.sawValley = true;
-          }
-          this.wasAboveThreshold = true;
-          return finalizedThrow;
-        }
-        this.throwBaselineWrist = smoothedWrist;
-        this.throwBaselineElbowAngle = sampleElbowAngle(smoothedSample);
-        this.pendingPeak = {
-          speed,
-          timestamp: smoothedSample.timestamp,
-          wrist: smoothedWrist,
-        };
-        this.wasAboveThreshold = true;
-        this.sawValley = false;
-        this.quietSince = null;
-        return finalizedThrow;
-      }
       if (!this.wasAboveThreshold) {
         this.throwBaselineWrist = smoothedWrist;
         this.throwBaselineElbowAngle = sampleElbowAngle(smoothedSample);
@@ -952,9 +927,6 @@ export class ThrowDetector {
           timestamp: smoothedSample.timestamp,
           wrist: smoothedWrist,
         };
-        this.sawValley = false;
-      } else if (speed <= VALLEY_SPEED_RATIO * this.pendingPeak.speed) {
-        this.sawValley = true;
       }
       this.wasAboveThreshold = true;
       return finalizedThrow;
@@ -967,9 +939,7 @@ export class ThrowDetector {
       if (now - this.quietSince < MOTION_SETTLE_MS) {
         return finalizedThrow;
       }
-      if (canAccept) {
-        this.considerPendingPeak(detectionEnabled);
-      }
+      this.considerPendingPeak(detectionEnabled);
       return finalizedThrow;
     }
 
@@ -1044,7 +1014,7 @@ export class ThrowDetector {
     this.currentWristSpeed = 0;
     this.primed = false;
     this.quietSince = null;
-    this.sawValley = false;
+    this.rearmQuietSince = null;
     this.recentGaps = [];
   }
 }

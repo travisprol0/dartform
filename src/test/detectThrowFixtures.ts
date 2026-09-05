@@ -36,6 +36,7 @@ export function forearmWrist(
   };
 }
 
+export const AIM_WRIST = forearmWrist(AIM_FOREARM_DEG);
 export const THROW_PEAK_WRIST = forearmWrist(RELEASE_FOREARM_DEG);
 export const THROW_END_X = THROW_PEAK_WRIST.x;
 
@@ -359,7 +360,7 @@ export function restForMs(
   detector: ThrowDetector,
   timestamp: number,
   durationMs: number,
-  wrist = THROW_PEAK_WRIST,
+  wrist = AIM_WRIST,
   events?: ThrowEvent[],
 ): number {
   const end = timestamp + durationMs;
@@ -400,6 +401,43 @@ export function valleyDip(
       detector.addSample(poseSample(timestamp, hold.x, hold.y, 0, 0.5, 0.5)),
     );
     timestamp += FRAME_MS;
+  }
+  return timestamp;
+}
+
+/** Reach across the body the way a player grabs the next dart. */
+export function takeNextDart(
+  detector: ThrowDetector,
+  timestamp: number,
+  events?: ThrowEvent[],
+): number {
+  const start = THROW_PEAK_WRIST;
+  const across = forearmWrist(AIM_FOREARM_DEG, 0.28, 0.55);
+  for (let cycle = 0; cycle < 3; cycle++) {
+    for (let frame = 1; frame <= 6; frame++) {
+      const progress = frame / 6;
+      const x = start.x + (across.x - start.x) * progress;
+      const y = start.y + (across.y - start.y) * progress;
+      recordThrowEvent(
+        events,
+        detector.addSample(
+          poseSample(timestamp, x, y, 0, 0.5, 0.5),
+        ),
+      );
+      timestamp += FRAME_MS;
+    }
+    for (let frame = 1; frame <= 6; frame++) {
+      const progress = frame / 6;
+      const x = across.x + (start.x - across.x) * progress;
+      const y = across.y + (start.y - across.y) * progress;
+      recordThrowEvent(
+        events,
+        detector.addSample(
+          poseSample(timestamp, x, y, 0, 0.5, 0.5),
+        ),
+      );
+      timestamp += FRAME_MS;
+    }
   }
   return timestamp;
 }
