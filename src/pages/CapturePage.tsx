@@ -7,6 +7,7 @@ import {
   THROW_RECORDING_SCENARIOS,
   type ThrowRecordingScenario,
 } from '../analysis/throwDetection/recording';
+import { throwRejectionLabel } from '../analysis/throwDetection/classifyThrow';
 import type { RoundSummary, ThrowingHand } from '../types/round';
 
 type CapturePageProps = {
@@ -74,6 +75,12 @@ export function CapturePage({
       return 'Tracking your throw…';
     }
     if (detectorState === 'seekingAim') {
+      if (
+        lastDetectionDiagnostic &&
+        !lastDetectionDiagnostic.accepted
+      ) {
+        return `${throwRejectionLabel(lastDetectionDiagnostic.reason)} — set aim again`;
+      }
       return dartCount > 0
         ? 'Set your next aim and hold'
         : 'Set your aim and hold';
@@ -90,6 +97,7 @@ export function CapturePage({
     dartCount,
     detectorArmed,
     detectorState,
+    lastDetectionDiagnostic,
     status,
   ]);
 
@@ -212,8 +220,9 @@ export function CapturePage({
               <p className="overlay-line">Detector: {detectorState}</p>
               {lastDetectionDiagnostic ? (
                 <p className="overlay-line">
-                  Last bout: {lastDetectionDiagnostic.reason} ·{' '}
-                  {lastDetectionDiagnostic.score.toFixed(2)}
+                  Last bout:{' '}
+                  {throwRejectionLabel(lastDetectionDiagnostic.reason)}{' '}
+                  · {lastDetectionDiagnostic.score.toFixed(2)}
                 </p>
               ) : null}
               <p className="overlay-line">

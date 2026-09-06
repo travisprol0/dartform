@@ -545,10 +545,18 @@ export function usePoseCamera({
       roundInProgress: boolean,
     ): ThrowEvent | null => {
       const detector = throwDetectorRef.current;
-      const finalizedThrow = detector.advance(now);
+      const finalizedThrow = detector.noteMissingTracking(now);
       if (finalizedThrow) {
         recordThrow(finalizedThrow);
         return finalizedThrow;
+      }
+      const diagnostic = detector.getLastDiagnostic();
+      if (
+        diagnostic &&
+        diagnostic.motionEndAt !== lastDiagnosticAtRef.current
+      ) {
+        lastDiagnosticAtRef.current = diagnostic.motionEndAt;
+        setLastDetectionDiagnostic(diagnostic);
       }
 
       const collecting = detector.isCollectingPostRoll();

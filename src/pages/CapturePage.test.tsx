@@ -314,6 +314,62 @@ describe('CapturePage rotation and capture HUD', () => {
     });
 
     stubCamera({
+      dartCount: 0,
+      detectorArmed: false,
+      detectorState: 'seekingAim',
+      collectingPostRoll: false,
+      status: 'finding_arm',
+      armTracked: true,
+      lastDetectionDiagnostic: {
+        accepted: false,
+        reason: 'insufficient_release_speed',
+        score: 0.4,
+        scores: {
+          outwardReach: 0,
+          outwardSpeed: 0,
+          elbowExtension: 0,
+          extensionSpeed: 0,
+          releaseSpeed: 0,
+          elbowStability: 1,
+          bodyStability: 1,
+          worldDepthEvidence: 0,
+        },
+        measurements: {
+          reachGain: 0,
+          peakOutwardSpeed: 0,
+          elbowExtensionDeg: 0,
+          peakExtensionVelocityDeg: 0,
+          peakNormalizedWristSpeed: 2,
+          elbowAnchorTravel: 0,
+          bodyMotion: 0,
+          peakWorldDepthSpeed: 0,
+          worldDepthCoverage: 0,
+          validCoverage: 1,
+        },
+        peakIndex: 0,
+        peakTimestamp: 0,
+        peakSpeedMetersPerSecond: 0.5,
+        motionStartAt: 0,
+        motionEndAt: 100,
+      },
+    });
+    ({ container, root } = renderPage(
+      <CapturePage
+        throwingHand="right"
+        onRoundComplete={() => undefined}
+        onCancel={() => undefined}
+      />,
+    ));
+    expect(container.querySelector('.status-line')?.textContent).toBe(
+      'Looked like an aim pump — set aim again',
+    );
+
+    act(() => {
+      root.unmount();
+      container.remove();
+    });
+
+    stubCamera({
       collectingPostRoll: true,
       status: 'ready',
       dartCount: 1,

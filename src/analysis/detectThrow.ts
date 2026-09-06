@@ -10,6 +10,7 @@ import {
 import {
   StableAimMotionSegmenter,
   STABLE_AIM_DURATION_MS,
+  type MotionSegmentUpdate,
   type ThrowMotionState,
 } from './throwDetection/motionSegmenter';
 import {
@@ -146,14 +147,8 @@ export class ThrowDetector {
       frame.timestamp,
     );
 
-    if (!frame.continuous || !frame.valid) {
-      this.segmenter.reset();
-      return finalizedThrow;
-    }
-
-    if (!detectionEnabled) {
-      this.segmenter.reset();
-      return finalizedThrow;
+    if (!frame.continuous || !frame.valid || !detectionEnabled) {
+      return this.finishOrResetBout(frame.timestamp, finalizedThrow);
     }
 
     const allowArm =
@@ -164,31 +159,16 @@ export class ThrowDetector {
       return finalizedThrow;
     }
 
-    const bout = this.featureBuffer.filter(
-      (candidate) =>
-        candidate.timestamp >= update.boutStartAt &&
-        candidate.timestamp <= update.motionEndAt,
-    );
-    const diagnostic = classifyThrowBout(
-      bout,
-      update.motionStartAt,
-      update.motionEndAt,
-    );
-    this.lastDiagnostic = diagnostic;
-    if (!diagnostic.accepted || this.pendingThrow !== null) {
-      return finalizedThrow;
-    }
-
-    this.lastThrowAt = diagnostic.peakTimestamp;
-    this.pendingThrow = {
-      peakTimestamp: diagnostic.peakTimestamp,
-      peakSpeed: diagnostic.peakSpeedMetersPerSecond,
-    };
-    return finalizedThrow;
+    return this.scoreCompletedBout(update, finalizedThrow);
   }
 
   advance(now: number): ThrowEvent | null {
     return this.finalizePendingThrow(now);
+  }
+
+  noteMissingTracking(now: number): ThrowEvent | null {
+    const finalizedThrow = this.finalizePendingThrow(now);
+    return this.finishOrResetBout(now, finalizedThrow);
   }
 
   getCurrentWristSpeed(): number {
@@ -275,6 +255,48 @@ export class ThrowDetector {
     this.lastThrowAt = Number.NEGATIVE_INFINITY;
     this.primed = false;
     this.lastDiagnostic = null;
+  }
+
+  private finishOrResetBout(
+    timestamp: number,
+    finalizedThrow: ThrowEvent | null,
+  ): ThrowEvent | null {
+    if (this.segmenter.getState() === 'active') {
+      const update = this.segmenter.forceComplete(timestamp);
+      if (update.kind === 'boutCompleted') {
+        return this.scoreCompletedBout(update, finalizedThrow);
+      }
+    } else {
+      this.segmenter.reset();
+    }
+    return finalizedThrow;
+  }
+
+  private scoreCompletedBout(
+    update: Extract<MotionSegmentUpdate, { kind: 'boutCompleted' }>,
+    finalizedThrow: ThrowEvent | null,
+  ): ThrowEvent | null {
+    const bout = this.featureBuffer.filter(
+      (candidate) =>
+        candidate.timestamp >= update.boutStartAt &&
+        candidate.timestamp <= update.motionEndAt,
+    );
+    const diagnostic = classifyThrowBout(
+      bout,
+      update.motionStartAt,
+      update.motionEndAt,
+    );
+    this.lastDiagnostic = diagnostic;
+    if (!diagnostic.accepted || this.pendingThrow !== null) {
+      return finalizedThrow;
+    }
+
+    this.lastThrowAt = diagnostic.peakTimestamp;
+    this.pendingThrow = {
+      peakTimestamp: diagnostic.peakTimestamp,
+      peakSpeed: diagnostic.peakSpeedMetersPerSecond,
+    };
+    return finalizedThrow;
   }
 
   private finalizePendingThrow(now: number): ThrowEvent | null {

@@ -296,6 +296,7 @@ export type ThrowRecordingReplayTarget = {
     detectionEnabled?: boolean,
   ) => ThrowEvent | null;
   advance: (now: number) => ThrowEvent | null;
+  noteMissingTracking?: (now: number) => ThrowEvent | null;
 };
 
 export function replayThrowRecording(
@@ -310,7 +311,8 @@ export function replayThrowRecording(
           clonePoseSample(frame.sample),
           frame.detectionEnabled,
         )
-      : detector.advance(frame.timestamp);
+      : detector.noteMissingTracking?.(frame.timestamp) ??
+        detector.advance(frame.timestamp);
     if (event) {
       events.push(event);
     }

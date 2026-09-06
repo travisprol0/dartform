@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BUFFER_SIZE,
   MIN_READY_BUFFER_MS,
+  TRACE_AFTER_MS,
   ThrowDetector,
   extractThrowTrace,
   type PoseSample,
@@ -52,6 +53,93 @@ describe('ThrowDetector stable aim', () => {
       detector.addSample(aimedPose(frame * FRAME_MS), false);
     }
     expect(detector.isArmed()).toBe(false);
+  });
+
+  it('starts a motion bout when the armed pose leaves aim', () => {
+    const detector = new ThrowDetector();
+    let timestamp = 0;
+    for (let frame = 0; frame < 20; frame += 1) {
+      detector.addSample(aimedPose(timestamp));
+      timestamp += FRAME_MS;
+    }
+    expect(detector.isArmed()).toBe(true);
+
+    const leavingAim = aimedPose(timestamp);
+    leavingAim.wrist = { x: 0.18, y: 0.72, z: 0, visibility: 1 };
+    detector.addSample(leavingAim);
+    expect(detector.getState()).toBe('active');
+    expect(detector.hasStableAim()).toBe(true);
+  });
+
+  it('classifies an in-progress bout when tracking drops', () => {
+    const detector = new ThrowDetector();
+    let timestamp = 0;
+    for (let frame = 0; frame < 20; frame += 1) {
+      detector.addSample(aimedPose(timestamp));
+      timestamp += FRAME_MS;
+    }
+
+    for (let frame = 0; frame < 6; frame += 1) {
+      const sample = aimedPose(timestamp);
+      const t = (frame + 1) / 6;
+      sample.wrist = {
+        x: 0.46 - t * 0.32,
+        y: 0.34 + t * 0.22,
+        z: 0,
+        visibility: 1,
+      };
+      detector.addSample(sample);
+      timestamp += FRAME_MS;
+    }
+
+    expect(detector.getState()).toBe('active');
+    detector.noteMissingTracking(timestamp);
+    const diagnostic = detector.getLastDiagnostic();
+    expect(diagnostic).not.toBeNull();
+    expect(detector.getState()).toBe(
+      diagnostic?.accepted ? 'postRoll' : 'seekingAim',
+    );
+  });
+
+  it('records a throw after leaving aim and waiting for follow-through', () => {
+    const detector = new ThrowDetector();
+    let timestamp = 0;
+    for (let frame = 0; frame < 20; frame += 1) {
+      detector.addSample(aimedPose(timestamp));
+      timestamp += FRAME_MS;
+    }
+
+    for (let frame = 0; frame < 8; frame += 1) {
+      const sample = aimedPose(timestamp);
+      const t = (frame + 1) / 8;
+      sample.wrist = {
+        x: 0.46 - t * 0.34,
+        y: 0.34 + t * 0.08,
+        z: 0,
+        visibility: 1,
+      };
+      detector.addSample(sample);
+      timestamp += FRAME_MS;
+    }
+
+    const followThrough = aimedPose(timestamp);
+    followThrough.wrist = { x: 0.12, y: 0.42, z: 0, visibility: 1 };
+    for (let frame = 0; frame < 12; frame += 1) {
+      followThrough.timestamp = timestamp;
+      detector.addSample({
+        ...followThrough,
+        wrist: { ...followThrough.wrist },
+        elbow: { ...followThrough.elbow },
+        shoulder: { ...followThrough.shoulder },
+      });
+      timestamp += FRAME_MS;
+    }
+
+    const events = [
+      detector.advance(timestamp + TRACE_AFTER_MS),
+    ].filter(Boolean);
+    expect(detector.getLastDiagnostic()?.accepted).toBe(true);
+    expect(events).toHaveLength(1);
   });
 });
 

@@ -17,6 +17,27 @@ export type ThrowRejectionReason =
   | 'excessive_body_motion'
   | 'low_throw_score';
 
+export function throwRejectionLabel(reason: ThrowRejectionReason): string {
+  switch (reason) {
+    case 'accepted':
+      return 'Throw accepted';
+    case 'insufficient_tracking':
+      return 'Arm tracking dropped';
+    case 'insufficient_outward_reach':
+      return 'Not enough forward reach';
+    case 'insufficient_outward_speed':
+      return 'Motion was too slow';
+    case 'insufficient_release_speed':
+      return 'Looked like an aim pump';
+    case 'insufficient_extension':
+      return 'Elbow did not extend';
+    case 'excessive_body_motion':
+      return 'Too much body motion';
+    case 'low_throw_score':
+      return 'Motion did not look like a throw';
+  }
+}
+
 export type ThrowScoreComponents = {
   outwardReach: number;
   outwardSpeed: number;

@@ -11,7 +11,7 @@ const AIM_MIN_HORIZONTAL_REACH = 0.35;
 const AIM_MAX_HORIZONTAL_REACH = 1.75;
 const BASE_QUIET_SPEED = 1.35;
 const MAX_ADAPTIVE_QUIET_SPEED = 2.25;
-const BASE_START_SPEED = 3;
+const BASE_START_SPEED = 1.8;
 const MAX_STABLE_ELBOW_SPEED = 1.4;
 const MAX_STABLE_TORSO_SPEED = 1.15;
 const MIN_START_EXTENSION_VELOCITY = 115;
@@ -129,24 +129,8 @@ export class StableAimMotionSegmenter {
     }
 
     if (this.state === 'armed') {
-      if (this.isMotionStart(frame)) {
-        this.state = 'active';
-        this.motionStartAt = frame.timestamp;
-        this.boutStartAt = Math.max(
-          this.stableAimSince ?? frame.timestamp,
-          frame.timestamp - PRE_BOUT_CONTEXT_MS,
-        );
-        this.quietSince = null;
-        return {
-          kind: 'boutStarted',
-          state: this.state,
-          boutStartAt: this.boutStartAt,
-          motionStartAt: this.motionStartAt,
-        };
-      }
-
-      if (!isPlausibleAim(frame)) {
-        this.reset();
+      if (this.isMotionStart(frame) || !isPlausibleAim(frame)) {
+        return this.beginBout(frame);
       }
       return { kind: 'none', state: this.state };
     }
@@ -168,15 +152,15 @@ export class StableAimMotionSegmenter {
       return { kind: 'none', state: this.state };
     }
 
-    const result: MotionSegmentUpdate = {
-      kind: 'boutCompleted',
-      state: 'seekingAim',
-      boutStartAt: this.boutStartAt ?? motionStartAt,
-      motionStartAt,
-      motionEndAt: frame.timestamp,
-    };
-    this.reset();
-    return result;
+    return this.completeBout(frame.timestamp);
+  }
+
+  forceComplete(timestamp: number): MotionSegmentUpdate {
+    if (this.state !== 'active') {
+      this.reset();
+      return { kind: 'none', state: this.state };
+    }
+    return this.completeBout(timestamp);
   }
 
   getState(): ThrowMotionState {
@@ -194,6 +178,35 @@ export class StableAimMotionSegmenter {
     this.motionStartAt = null;
     this.boutStartAt = null;
     this.quietSince = null;
+  }
+
+  private beginBout(frame: PoseFeatureFrame): MotionSegmentUpdate {
+    this.state = 'active';
+    this.motionStartAt = frame.timestamp;
+    this.boutStartAt = Math.max(
+      this.stableAimSince ?? frame.timestamp,
+      frame.timestamp - PRE_BOUT_CONTEXT_MS,
+    );
+    this.quietSince = null;
+    return {
+      kind: 'boutStarted',
+      state: this.state,
+      boutStartAt: this.boutStartAt,
+      motionStartAt: this.motionStartAt,
+    };
+  }
+
+  private completeBout(timestamp: number): MotionSegmentUpdate {
+    const motionStartAt = this.motionStartAt ?? timestamp;
+    const result: MotionSegmentUpdate = {
+      kind: 'boutCompleted',
+      state: 'seekingAim',
+      boutStartAt: this.boutStartAt ?? motionStartAt,
+      motionStartAt,
+      motionEndAt: timestamp,
+    };
+    this.reset();
+    return result;
   }
 
   private isStableAimFrame(frame: PoseFeatureFrame): boolean {
@@ -224,6 +237,6 @@ export class StableAimMotionSegmenter {
   }
 
   private startSpeedThreshold(): number {
-    return Math.max(BASE_START_SPEED, this.quietSpeedThreshold() * 2);
+    return Math.max(BASE_START_SPEED, this.quietSpeedThreshold() * 1.15);
   }
 }
