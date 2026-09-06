@@ -47,6 +47,7 @@ export function CapturePage({
     poseDelegate,
     traceRecordingActive,
     traceRecordingFrameCount,
+    traceRecordingExportResult,
     lastDetectionDiagnostic,
     startTraceRecording,
     stopAndDownloadTraceRecording,
@@ -234,13 +235,13 @@ export function CapturePage({
               <p className="overlay-line">
                 Wrist speed: {wristSpeed.toFixed(2)} m/s
               </p>
-              {import.meta.env.DEV ? (
-                <div className="trace-recorder">
+              <div className="trace-recorder">
                   <p className="trace-recorder__title">
                     Landmark trace recorder
                   </p>
                   <p className="trace-recorder__privacy">
-                    Coordinates only—no image, video, or upload.
+                    Coordinates only—no image, video, or upload. On Pixel,
+                    Stop opens the share sheet so you can send the JSON.
                   </p>
                   <label className="trace-recorder__label">
                     Scenario
@@ -265,9 +266,11 @@ export function CapturePage({
                       <>
                         <button
                           type="button"
-                          onClick={stopAndDownloadTraceRecording}
+                          onClick={() => {
+                            void stopAndDownloadTraceRecording();
+                          }}
                         >
-                          Stop &amp; download
+                          Stop &amp; share
                         </button>
                         <button
                           type="button"
@@ -292,11 +295,12 @@ export function CapturePage({
                     {traceRecordingActive
                       ? `Recording… ${traceRecordingFrameCount} frames`
                       : traceRecordingFrameCount > 0
-                        ? `Downloaded ${traceRecordingFrameCount} frames`
+                        ? traceRecordingExportResult === 'shared'
+                          ? `Shared ${traceRecordingFrameCount} frames`
+                          : `Saved ${traceRecordingFrameCount} frames — check Downloads`
                         : 'Choose a scenario, start, perform it, then stop.'}
                   </p>
                 </div>
-              ) : null}
             </div>
           ) : null}
         </div>

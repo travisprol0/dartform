@@ -3,6 +3,7 @@ import { poseSample } from '../../test/fixtures';
 import {
   THROW_RECORDING_SCENARIOS,
   ThrowTraceRecorder,
+  exportThrowRecording,
   parseThrowRecording,
   recordingFilename,
   replayThrowRecording,
@@ -131,6 +132,23 @@ describe('throw recording serialization', () => {
         (scenario) => scenario.id === 'aim_pumps',
       )?.expectedThrowCount,
     ).toBe(0);
+  });
+
+  it('opens the share sheet when the browser can send files', async () => {
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', {
+      share,
+      canShare: () => true,
+    });
+    await expect(exportThrowRecording(makeRecording())).resolves.toBe(
+      'shared',
+    );
+    expect(share).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'trace-one-single_throw.json',
+      }),
+    );
+    vi.unstubAllGlobals();
   });
 });
 

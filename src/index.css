@@ -632,26 +632,28 @@ button {
 
 .trace-recorder select {
   max-width: 100%;
-  padding: 5px;
+  padding: 8px 10px;
   border: 1px solid #475569;
   border-radius: 5px;
   background: #0f172a;
   color: #e2e8f0;
+  font-size: 1rem;
 }
 
 .trace-recorder__actions {
   display: flex;
-  gap: 6px;
-  margin: 6px 0;
+  gap: 8px;
+  margin: 8px 0;
 }
 
 .trace-recorder__actions button {
-  padding: 5px 8px;
+  min-height: 44px;
+  padding: 8px 12px;
   border: 1px solid #475569;
   border-radius: 5px;
   background: #1e293b;
   color: #e2e8f0;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
 }
 
 .page--scroll {

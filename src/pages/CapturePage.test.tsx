@@ -71,6 +71,7 @@ function stubCamera(overrides: Partial<CameraState> = {}): {
     poseDelegate: 'GPU',
     traceRecordingActive: false,
     traceRecordingFrameCount: 0,
+    traceRecordingExportResult: null,
     lastDetectionDiagnostic: null,
     startTraceRecording,
     stopAndDownloadTraceRecording,
@@ -519,7 +520,7 @@ describe('CapturePage rotation and capture HUD', () => {
     );
   });
 
-  it('records labeled landmark traces from development debug controls', () => {
+  it('records labeled landmark traces from debug controls', () => {
     const { startTraceRecording } = stubCamera();
     ({ container, root } = renderPage(
       <CapturePage
@@ -586,7 +587,7 @@ describe('CapturePage rotation and capture HUD', () => {
     );
     act(() => {
       buttons
-        .find((button) => button.textContent === 'Stop & download')
+        .find((button) => button.textContent === 'Stop & share')
         ?.click();
       buttons.find((button) => button.textContent === 'Cancel')?.click();
     });

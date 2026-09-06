@@ -8,8 +8,9 @@ import {
   type ThrowEvent,
 } from '../analysis/detectThrow';
 import {
-  downloadThrowRecording,
+  exportThrowRecording,
   ThrowTraceRecorder,
+  type ThrowRecordingExportResult,
   type ThrowRecordingFrame,
   type ThrowRecordingScenario,
 } from '../analysis/throwDetection/recording';
@@ -102,6 +103,8 @@ export function usePoseCamera({
   const [poseDelegate, setPoseDelegate] = useState<PoseDelegate>('CPU');
   const [traceRecordingActive, setTraceRecordingActive] = useState(false);
   const [traceRecordingFrameCount, setTraceRecordingFrameCount] = useState(0);
+  const [traceRecordingExportResult, setTraceRecordingExportResult] =
+    useState<ThrowRecordingExportResult | null>(null);
   const [lastDetectionDiagnostic, setLastDetectionDiagnostic] =
     useState<ThrowCandidateDiagnostic | null>(null);
 
@@ -154,25 +157,28 @@ export function usePoseCamera({
       });
       lastTraceCountAtRef.current = 0;
       setTraceRecordingFrameCount(0);
+      setTraceRecordingExportResult(null);
       setTraceRecordingActive(true);
     },
     [facingMode, poseDelegate, throwingHand],
   );
 
-  const stopAndDownloadTraceRecording = useCallback(() => {
+  const stopAndDownloadTraceRecording = useCallback(async () => {
     const recording = traceRecorderRef.current.stop(performance.now());
     setTraceRecordingActive(false);
     if (!recording) {
       return;
     }
     setTraceRecordingFrameCount(recording.frames.length);
-    downloadThrowRecording(recording);
+    const result = await exportThrowRecording(recording);
+    setTraceRecordingExportResult(result);
   }, []);
 
   const cancelTraceRecording = useCallback(() => {
     traceRecorderRef.current.cancel();
     setTraceRecordingActive(false);
     setTraceRecordingFrameCount(0);
+    setTraceRecordingExportResult(null);
   }, []);
 
   const flipCamera = useCallback(() => {
@@ -223,6 +229,7 @@ export function usePoseCamera({
     setDetectorState('seekingAim');
     setTraceRecordingActive(false);
     setTraceRecordingFrameCount(0);
+    setTraceRecordingExportResult(null);
     setLastDetectionDiagnostic(null);
     setDartCount(0);
     setArmVisible(false);
@@ -825,6 +832,7 @@ export function usePoseCamera({
     poseDelegate,
     traceRecordingActive,
     traceRecordingFrameCount,
+    traceRecordingExportResult,
     lastDetectionDiagnostic,
     startTraceRecording,
     stopAndDownloadTraceRecording,

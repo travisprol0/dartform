@@ -290,6 +290,44 @@ export function downloadThrowRecording(recording: ThrowRecording): void {
   URL.revokeObjectURL(href);
 }
 
+export type ThrowRecordingExportResult = 'shared' | 'downloaded';
+
+function recordingFile(recording: ThrowRecording): File {
+  return new File(
+    [serializeThrowRecording(recording)],
+    recordingFilename(recording),
+    { type: 'application/json' },
+  );
+}
+
+export async function exportThrowRecording(
+  recording: ThrowRecording,
+): Promise<ThrowRecordingExportResult> {
+  const file = recordingFile(recording);
+  const shareData: ShareData = {
+    files: [file],
+    title: file.name,
+    text: 'DartForm landmark trace (coordinates only).',
+  };
+  if (
+    typeof navigator.share === 'function' &&
+    (typeof navigator.canShare !== 'function' ||
+      navigator.canShare(shareData))
+  ) {
+    try {
+      await navigator.share(shareData);
+      return 'shared';
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        downloadThrowRecording(recording);
+        return 'downloaded';
+      }
+    }
+  }
+  downloadThrowRecording(recording);
+  return 'downloaded';
+}
+
 export type ThrowRecordingReplayTarget = {
   addSample: (
     sample: PoseSample,
