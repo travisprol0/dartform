@@ -145,7 +145,7 @@ describe('ThrowDetector stable aim', () => {
 
 describe('real profile-view replay corpus', () => {
   for (const recording of REAL_THROW_RECORDINGS) {
-    it(`${recording.scenario} emits exactly ${recording.expectedThrowCount}`, () => {
+    it(`${recording.id} ${recording.scenario} emits exactly ${recording.expectedThrowCount}`, () => {
       const detector = new ThrowDetector();
       const events = replayThrowRecording(recording, detector);
       expect(events).toHaveLength(recording.expectedThrowCount);

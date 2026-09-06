@@ -6,7 +6,7 @@ recorder on the capture screen and contain pose coordinates, timing,
 visibility, and detector state only—never camera images or video.
 
 The corpus includes a profile-view single throw, aim-pump negative, throw
-then take the next dart, and a Pixel three-dart round. Each fixture is
+then take the next dart, and two Pixel three-dart rounds. Each fixture is
 replayed exactly once and must emit its declared `expectedThrowCount`.
 
 Record multiple profile-view clips for every scenario in the recorder. Keep

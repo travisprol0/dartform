@@ -4,8 +4,10 @@ export const CANONICAL_FOREARM_LENGTH_METERS = 0.25;
 export const MIN_THROW_SCORE = 0.55;
 
 const MIN_OUTWARD_REACH_GAIN = 0.2;
-const MIN_OUTWARD_SPEED = 1.5;
+const MIN_OUTWARD_SPEED = 1.35;
 const MIN_RELEASE_SPEED = 3.1;
+const MIN_COMMITTED_EXTENSION_DEG = 32;
+const MIN_COMMITTED_REACH_GAIN = 0.35;
 /** Front/profile throws often travel in world Z with little image-X reach. */
 const MIN_WORLD_DEPTH_SPEED = 5.5;
 const MIN_DEPTH_RELEASE_SPEED = 6;
@@ -310,6 +312,9 @@ export function classifyThrowBout(
     scores.bodyStability * 0.03 +
     scores.worldDepthEvidence * 0.02;
 
+  const committedExtension =
+    elbowExtensionDeg >= MIN_COMMITTED_EXTENSION_DEG &&
+    reachGain >= MIN_COMMITTED_REACH_GAIN;
   const imageDelivery =
     reachGain >= MIN_OUTWARD_REACH_GAIN &&
     peakOutwardSpeed >= MIN_OUTWARD_SPEED;
@@ -332,13 +337,20 @@ export function classifyThrowBout(
     } else {
       reason = 'insufficient_release_speed';
     }
-  } else if (peakNormalizedWristSpeed < MIN_RELEASE_SPEED) {
+  } else if (
+    peakNormalizedWristSpeed < MIN_RELEASE_SPEED &&
+    !committedExtension
+  ) {
     reason = 'insufficient_release_speed';
   } else if (littleElbowChange && !depthDelivery) {
     reason = 'insufficient_extension';
   } else if (scores.bodyStability === 0 && score < MIN_THROW_SCORE) {
     reason = 'excessive_body_motion';
-  } else if (score < MIN_THROW_SCORE && !depthDelivery) {
+  } else if (
+    score < MIN_THROW_SCORE &&
+    !depthDelivery &&
+    !committedExtension
+  ) {
     reason = 'low_throw_score';
   }
 
