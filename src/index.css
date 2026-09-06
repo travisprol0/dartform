@@ -600,6 +600,60 @@ button {
   line-height: 1.5;
 }
 
+.trace-recorder {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #475569;
+}
+
+.trace-recorder__title,
+.trace-recorder__privacy,
+.trace-recorder__status {
+  margin: 0 0 5px;
+  font-size: 0.75rem;
+}
+
+.trace-recorder__title {
+  color: #e2e8f0;
+  font-weight: 700;
+}
+
+.trace-recorder__privacy,
+.trace-recorder__status {
+  color: #94a3b8;
+}
+
+.trace-recorder__label {
+  display: grid;
+  gap: 3px;
+  color: #cbd5e1;
+  font-size: 0.75rem;
+}
+
+.trace-recorder select {
+  max-width: 100%;
+  padding: 5px;
+  border: 1px solid #475569;
+  border-radius: 5px;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.trace-recorder__actions {
+  display: flex;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.trace-recorder__actions button {
+  padding: 5px 8px;
+  border: 1px solid #475569;
+  border-radius: 5px;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 0.75rem;
+}
+
 .page--scroll {
   width: 100%;
   max-width: 760px;

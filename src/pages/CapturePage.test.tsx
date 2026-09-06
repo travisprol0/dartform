@@ -39,8 +39,14 @@ function renderPage(element: ReactElement): {
 
 function stubCamera(overrides: Partial<CameraState> = {}): {
   flipCamera: ReturnType<typeof vi.fn>;
+  startTraceRecording: ReturnType<typeof vi.fn>;
+  stopAndDownloadTraceRecording: ReturnType<typeof vi.fn>;
+  cancelTraceRecording: ReturnType<typeof vi.fn>;
 } {
   const flipCamera = vi.fn();
+  const startTraceRecording = vi.fn();
+  const stopAndDownloadTraceRecording = vi.fn();
+  const cancelTraceRecording = vi.fn();
   mockedUsePoseCamera.mockReturnValue({
     videoRef: { current: null },
     cameraError: null,
@@ -53,7 +59,8 @@ function stubCamera(overrides: Partial<CameraState> = {}): {
     overlayCanvasRef: { current: null },
     armTracked: false,
     collectingPostRoll: false,
-    detectorArmed: true,
+    detectorArmed: false,
+    detectorState: 'seekingAim',
     stableFrameCount: 3,
     stableFramesRequired: 8,
     wristSpeed: 1.25,
@@ -62,11 +69,22 @@ function stubCamera(overrides: Partial<CameraState> = {}): {
     flipCamera,
     facingMode: 'user',
     poseDelegate: 'GPU',
+    traceRecordingActive: false,
+    traceRecordingFrameCount: 0,
+    lastDetectionDiagnostic: null,
+    startTraceRecording,
+    stopAndDownloadTraceRecording,
+    cancelTraceRecording,
     canFlipCamera: true,
     dartsPerRound: 3,
     ...overrides,
   } as CameraState);
-  return { flipCamera };
+  return {
+    flipCamera,
+    startTraceRecording,
+    stopAndDownloadTraceRecording,
+    cancelTraceRecording,
+  };
 }
 
 describe('CapturePage rotation and capture HUD', () => {
@@ -226,6 +244,8 @@ describe('CapturePage rotation and capture HUD', () => {
       status: 'ready',
       armVisible: true,
       armTracked: true,
+      detectorArmed: true,
+      detectorState: 'armed',
     });
     ({ container, root } = renderPage(
       <CapturePage
@@ -235,7 +255,7 @@ describe('CapturePage rotation and capture HUD', () => {
       />,
     ));
     expect(container.querySelector('.status-line')?.textContent).toBe(
-      'Ready — throw',
+      'Aim locked — throw',
     );
     expect(container.querySelector('.overlay-hint--ready')?.textContent).toContain(
       'Teal lines',
@@ -251,6 +271,7 @@ describe('CapturePage rotation and capture HUD', () => {
       armVisible: false,
       armTracked: true,
       collectingPostRoll: false,
+      detectorState: 'seekingAim',
     });
     ({ container, root } = renderPage(
       <CapturePage
@@ -260,7 +281,7 @@ describe('CapturePage rotation and capture HUD', () => {
       />,
     ));
     expect(container.querySelector('.overlay-hint')?.textContent).toContain(
-      'hold steady',
+      'pause at aim',
     );
 
     act(() => {
@@ -271,8 +292,10 @@ describe('CapturePage rotation and capture HUD', () => {
     stubCamera({
       dartCount: 1,
       detectorArmed: false,
+      detectorState: 'seekingAim',
       collectingPostRoll: false,
       status: 'finding_arm',
+      armTracked: true,
     });
     ({ container, root } = renderPage(
       <CapturePage
@@ -282,7 +305,7 @@ describe('CapturePage rotation and capture HUD', () => {
       />,
     ));
     expect(container.querySelector('.status-line')?.textContent).toBe(
-      'Hold still to re-arm',
+      'Set your next aim and hold',
     );
 
     act(() => {
@@ -404,7 +427,7 @@ describe('CapturePage rotation and capture HUD', () => {
     const debug = container.querySelector('.debug-block')?.textContent ?? '';
     expect(debug).toContain('Landmarks: 33');
     expect(debug).toContain('Inference: 9.4 ms');
-    expect(debug).toContain('Arm visible: yes');
+    expect(debug).toContain('Aim locked: yes');
     expect(debug).toContain('Stable frames: 8 / 8');
     expect(debug).toContain('Wrist speed: 2.50 m/s');
     expect(debug).toContain('Pose: GPU');
@@ -433,10 +456,87 @@ describe('CapturePage rotation and capture HUD', () => {
         ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(container.querySelector('.debug-block')?.textContent).toContain(
-      'Arm visible: no',
+      'Aim locked: no',
     );
     expect(container.querySelector('.debug-block')?.textContent).toContain(
       'Pose: CPU',
     );
+  });
+
+  it('records labeled landmark traces from development debug controls', () => {
+    const { startTraceRecording } = stubCamera();
+    ({ container, root } = renderPage(
+      <CapturePage
+        throwingHand="right"
+        onRoundComplete={() => undefined}
+        onCancel={() => undefined}
+      />,
+    ));
+
+    act(() => {
+      container
+        .querySelector('.debug-toggle')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    const select = container.querySelector(
+      '.trace-recorder select',
+    ) as HTMLSelectElement | null;
+    expect(select).not.toBeNull();
+    act(() => {
+      if (select) {
+        select.value = 'arm_raise';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    act(() => {
+      Array.from(
+        container.querySelectorAll<HTMLButtonElement>(
+          '.trace-recorder button',
+        ),
+      )
+        .find((button) => button.textContent === 'Start recording')
+        ?.click();
+    });
+    expect(startTraceRecording).toHaveBeenCalledWith('arm_raise');
+
+    act(() => {
+      root.unmount();
+      container.remove();
+    });
+
+    const activeControls = stubCamera({
+      traceRecordingActive: true,
+      traceRecordingFrameCount: 24,
+    });
+    ({ container, root } = renderPage(
+      <CapturePage
+        throwingHand="right"
+        onRoundComplete={() => undefined}
+        onCancel={() => undefined}
+      />,
+    ));
+    act(() => {
+      container
+        .querySelector('.debug-toggle')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(container.querySelector('.trace-recorder')?.textContent).toContain(
+      '24 frames',
+    );
+    const buttons = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(
+        '.trace-recorder button',
+      ),
+    );
+    act(() => {
+      buttons
+        .find((button) => button.textContent === 'Stop & download')
+        ?.click();
+      buttons.find((button) => button.textContent === 'Cancel')?.click();
+    });
+    expect(
+      activeControls.stopAndDownloadTraceRecording,
+    ).toHaveBeenCalledTimes(1);
+    expect(activeControls.cancelTraceRecording).toHaveBeenCalledTimes(1);
   });
 });

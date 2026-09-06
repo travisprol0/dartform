@@ -3,8 +3,17 @@ import { FilesetResolver, type PoseLandmarker } from '@mediapipe/tasks-vision';
 import {
   MIN_READY_BUFFER_MS,
   ThrowDetector,
+  type ThrowDetectorState,
+  type PoseSample,
   type ThrowEvent,
 } from '../analysis/detectThrow';
+import {
+  downloadThrowRecording,
+  ThrowTraceRecorder,
+  type ThrowRecordingFrame,
+  type ThrowRecordingScenario,
+} from '../analysis/throwDetection/recording';
+import type { ThrowCandidateDiagnostic } from '../analysis/throwDetection/classifyThrow';
 import {
   computeDartMetrics,
   computeRoundSummary,
@@ -18,6 +27,7 @@ import {
 } from '../pose/cameraConstraints';
 import {
   createPoseLandmarker,
+  POSE_MODEL_URL,
   type PoseDelegate,
 } from '../pose/createPoseLandmarker';
 import type {
@@ -84,13 +94,20 @@ export function usePoseCamera({
   const [previousDart, setPreviousDart] = useState<DartMetrics | null>(null);
   const [armTracked, setArmTracked] = useState(false);
   const [collectingPostRoll, setCollectingPostRoll] = useState(false);
-  const [detectorArmed, setDetectorArmed] = useState(true);
+  const [detectorArmed, setDetectorArmed] = useState(false);
+  const [detectorState, setDetectorState] =
+    useState<ThrowDetectorState>('seekingAim');
   const [facingMode, setFacingMode] =
     useState<CameraFacingMode>('user');
   const [poseDelegate, setPoseDelegate] = useState<PoseDelegate>('CPU');
+  const [traceRecordingActive, setTraceRecordingActive] = useState(false);
+  const [traceRecordingFrameCount, setTraceRecordingFrameCount] = useState(0);
+  const [lastDetectionDiagnostic, setLastDetectionDiagnostic] =
+    useState<ThrowCandidateDiagnostic | null>(null);
 
   const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
   const throwDetectorRef = useRef(new ThrowDetector());
+  const traceRecorderRef = useRef(new ThrowTraceRecorder());
   const dartMetricsRef = useRef<DartMetrics[]>([]);
   const roundCompleteRef = useRef(false);
   const onRoundCompleteRef = useRef(onRoundComplete);
@@ -102,6 +119,8 @@ export function usePoseCamera({
   const streamRef = useRef<MediaStream | null>(null);
   const feedbackTimeoutRef = useRef<number | null>(null);
   const lastDebugHudAtRef = useRef(0);
+  const lastTraceCountAtRef = useRef(0);
+  const lastDiagnosticAtRef = useRef(Number.NEGATIVE_INFINITY);
   const overlayPaintRef = useRef<{
     landmarks: PoseLandmark[] | null;
     armTracked: boolean;
@@ -113,12 +132,48 @@ export function usePoseCamera({
     armVisible: false,
     armTracked: false,
     collectingPostRoll: false,
-    detectorArmed: true,
+    detectorArmed: false,
+    detectorState: 'seekingAim' as ThrowDetectorState,
     stableFrameCount: 0,
     wristSpeed: 0,
   });
 
   onRoundCompleteRef.current = onRoundComplete;
+
+  const startTraceRecording = useCallback(
+    (scenario: ThrowRecordingScenario) => {
+      const recorder = traceRecorderRef.current;
+      recorder.cancel();
+      recorder.start({
+        scenario,
+        throwingHand,
+        cameraFacing: facingMode,
+        poseDelegate,
+        poseModelUrl: POSE_MODEL_URL,
+        startedAt: performance.now(),
+      });
+      lastTraceCountAtRef.current = 0;
+      setTraceRecordingFrameCount(0);
+      setTraceRecordingActive(true);
+    },
+    [facingMode, poseDelegate, throwingHand],
+  );
+
+  const stopAndDownloadTraceRecording = useCallback(() => {
+    const recording = traceRecorderRef.current.stop(performance.now());
+    setTraceRecordingActive(false);
+    if (!recording) {
+      return;
+    }
+    setTraceRecordingFrameCount(recording.frames.length);
+    downloadThrowRecording(recording);
+  }, []);
+
+  const cancelTraceRecording = useCallback(() => {
+    traceRecorderRef.current.cancel();
+    setTraceRecordingActive(false);
+    setTraceRecordingFrameCount(0);
+  }, []);
 
   const flipCamera = useCallback(() => {
     if (dartMetricsRef.current.length > 0) {
@@ -133,6 +188,7 @@ export function usePoseCamera({
       feedbackTimeoutRef.current = null;
     }
     throwDetectorRef.current.reset();
+    traceRecorderRef.current.cancel();
     dartMetricsRef.current = [];
     roundCompleteRef.current = false;
     stableFrameCountRef.current = 0;
@@ -144,13 +200,16 @@ export function usePoseCamera({
       armStable: false,
     };
     lastDebugHudAtRef.current = 0;
+    lastTraceCountAtRef.current = 0;
+    lastDiagnosticAtRef.current = Number.NEGATIVE_INFINITY;
     hudRefs.current = {
       landmarkCount: 0,
       inferenceTimeMs: 0,
       armVisible: false,
       armTracked: false,
       collectingPostRoll: false,
-      detectorArmed: true,
+      detectorArmed: false,
+      detectorState: 'seekingAim',
       stableFrameCount: 0,
       wristSpeed: 0,
     };
@@ -160,7 +219,11 @@ export function usePoseCamera({
     setPreviousDart(null);
     setArmTracked(false);
     setCollectingPostRoll(false);
-    setDetectorArmed(true);
+    setDetectorArmed(false);
+    setDetectorState('seekingAim');
+    setTraceRecordingActive(false);
+    setTraceRecordingFrameCount(0);
+    setLastDetectionDiagnostic(null);
     setDartCount(0);
     setArmVisible(false);
     setStatus('finding_arm');
@@ -299,6 +362,7 @@ export function usePoseCamera({
         armTracked: boolean;
         collectingPostRoll: boolean;
         detectorArmed: boolean;
+        detectorState: ThrowDetectorState;
         stableFrameCount: number;
         wristSpeed: number;
       },
@@ -320,6 +384,10 @@ export function usePoseCamera({
         previous.detectorArmed = snapshot.detectorArmed;
         setDetectorArmed(snapshot.detectorArmed);
       }
+      if (previous.detectorState !== snapshot.detectorState) {
+        previous.detectorState = snapshot.detectorState;
+        setDetectorState(snapshot.detectorState);
+      }
 
       if (now - lastDebugHudAtRef.current < HUD_THROTTLE_MS) {
         return;
@@ -340,6 +408,50 @@ export function usePoseCamera({
       if (previous.wristSpeed !== snapshot.wristSpeed) {
         previous.wristSpeed = snapshot.wristSpeed;
         setWristSpeed(snapshot.wristSpeed);
+      }
+    };
+
+    const recordTraceFrame = (
+      timestamp: number,
+      inferenceTimeMs: number,
+      tracking: ThrowRecordingFrame['tracking'],
+      detectionEnabled: boolean,
+      sample: PoseSample | null,
+      event: ThrowEvent | null,
+    ) => {
+      const recorder = traceRecorderRef.current;
+      if (!recorder.isRecording()) {
+        return;
+      }
+      const detector = throwDetectorRef.current;
+      const diagnostic = detector.getLastDiagnostic();
+      recorder.recordFrame({
+        timestamp,
+        inferenceTimeMs,
+        tracking,
+        detectionEnabled,
+        sample,
+        detector: {
+          armed: detector.isArmed(),
+          collectingPostRoll: detector.isCollectingPostRoll(),
+          state: detector.getState(),
+          wristSpeed: detector.getCurrentWristSpeed(),
+          event,
+          diagnostic: diagnostic
+            ? {
+                accepted: diagnostic.accepted,
+                reason: diagnostic.reason,
+                score: diagnostic.score,
+                scores: { ...diagnostic.scores },
+                measurements: { ...diagnostic.measurements },
+                timestamp: diagnostic.motionEndAt,
+              }
+            : null,
+        },
+      });
+      if (timestamp - lastTraceCountAtRef.current >= 250) {
+        lastTraceCountAtRef.current = timestamp;
+        setTraceRecordingFrameCount(recorder.getFrameCount());
       }
     };
 
@@ -382,6 +494,7 @@ export function usePoseCamera({
         armTracked: hudRefs.current.armTracked,
         collectingPostRoll: false,
         detectorArmed: throwDetectorRef.current.isArmed(),
+        detectorState: throwDetectorRef.current.getState(),
         stableFrameCount: hudRefs.current.stableFrameCount,
         wristSpeed: hudRefs.current.wristSpeed,
       });
@@ -430,12 +543,12 @@ export function usePoseCamera({
     const handleMissingArm = (
       now: number,
       roundInProgress: boolean,
-    ) => {
+    ): ThrowEvent | null => {
       const detector = throwDetectorRef.current;
       const finalizedThrow = detector.advance(now);
       if (finalizedThrow) {
         recordThrow(finalizedThrow);
-        return;
+        return finalizedThrow;
       }
 
       const collecting = detector.isCollectingPostRoll();
@@ -460,9 +573,11 @@ export function usePoseCamera({
         armTracked: false,
         collectingPostRoll: collecting,
         detectorArmed: detector.isArmed(),
+        detectorState: detector.getState(),
         stableFrameCount: stableFrameCountRef.current,
         wristSpeed: 0,
       });
+      return null;
     };
 
     const detect = () => {
@@ -487,6 +602,7 @@ export function usePoseCamera({
           armTracked: hudRefs.current.armTracked,
           collectingPostRoll: heartbeatDetector.isCollectingPostRoll(),
           detectorArmed: heartbeatDetector.isArmed(),
+          detectorState: heartbeatDetector.getState(),
           stableFrameCount: hudRefs.current.stableFrameCount,
           wristSpeed: hudRefs.current.wristSpeed,
         });
@@ -514,7 +630,15 @@ export function usePoseCamera({
 
       if (!pose?.length) {
         paintOverlay(null, false, false);
-        handleMissingArm(now, roundInProgress);
+        const missingEvent = handleMissingArm(now, roundInProgress);
+        recordTraceFrame(
+          now,
+          inferenceTimeMs,
+          'missing_pose',
+          false,
+          null,
+          missingEvent,
+        );
         publishHud(now, {
           landmarkCount: 0,
           inferenceTimeMs,
@@ -522,6 +646,7 @@ export function usePoseCamera({
           armTracked: false,
           collectingPostRoll: hudRefs.current.collectingPostRoll,
           detectorArmed: hudRefs.current.detectorArmed,
+          detectorState: hudRefs.current.detectorState,
           stableFrameCount: stableFrameCountRef.current,
           wristSpeed: 0,
         });
@@ -536,7 +661,15 @@ export function usePoseCamera({
 
       if (!trackedPose) {
         paintOverlay(pose, false, false);
-        handleMissingArm(now, roundInProgress);
+        const missingEvent = handleMissingArm(now, roundInProgress);
+        recordTraceFrame(
+          now,
+          inferenceTimeMs,
+          'missing_arm',
+          false,
+          null,
+          missingEvent,
+        );
         publishHud(now, {
           landmarkCount: pose.length,
           inferenceTimeMs,
@@ -544,6 +677,7 @@ export function usePoseCamera({
           armTracked: false,
           collectingPostRoll: hudRefs.current.collectingPostRoll,
           detectorArmed: hudRefs.current.detectorArmed,
+          detectorState: hudRefs.current.detectorState,
           stableFrameCount: stableFrameCountRef.current,
           wristSpeed: 0,
         });
@@ -580,7 +714,7 @@ export function usePoseCamera({
         0,
       ) / 3;
 
-      const sample = {
+      const sample: PoseSample = {
         timestamp: now,
         ...trackedPose,
         world: worldTrackedPose ?? undefined,
@@ -593,6 +727,22 @@ export function usePoseCamera({
       const canDetectThrow =
         isArmStable && (hasPreRoll || detector.isPrimed());
       const throwEvent = detector.addSample(sample, canDetectThrow);
+      const diagnostic = detector.getLastDiagnostic();
+      if (
+        diagnostic &&
+        diagnostic.motionEndAt !== lastDiagnosticAtRef.current
+      ) {
+        lastDiagnosticAtRef.current = diagnostic.motionEndAt;
+        setLastDetectionDiagnostic(diagnostic);
+      }
+      recordTraceFrame(
+        now,
+        inferenceTimeMs,
+        'tracked',
+        canDetectThrow,
+        sample,
+        throwEvent,
+      );
       const collecting = detector.isCollectingPostRoll();
       const armed = detector.isArmed();
       const isReady =
@@ -609,6 +759,7 @@ export function usePoseCamera({
         armTracked: true,
         collectingPostRoll: collecting,
         detectorArmed: armed,
+        detectorState: detector.getState(),
         stableFrameCount: stableCount,
         wristSpeed: detector.getCurrentWristSpeed(),
       });
@@ -655,6 +806,7 @@ export function usePoseCamera({
     armTracked,
     collectingPostRoll,
     detectorArmed,
+    detectorState,
     stableFrameCount,
     stableFramesRequired: STABLE_FRAMES_REQUIRED,
     wristSpeed,
@@ -663,6 +815,12 @@ export function usePoseCamera({
     flipCamera,
     facingMode,
     poseDelegate,
+    traceRecordingActive,
+    traceRecordingFrameCount,
+    lastDetectionDiagnostic,
+    startTraceRecording,
+    stopAndDownloadTraceRecording,
+    cancelTraceRecording,
     canFlipCamera: dartCount === 0,
     dartsPerRound: DARTS_PER_ROUND,
   };
