@@ -5,8 +5,8 @@ Raw recordings live in `json-throws/` and are imported explicitly by
 recorder on the capture screen and contain pose coordinates, timing,
 visibility, and detector state only—never camera images or video.
 
-The initial profile-view corpus contains one normal throw, one aim-pump
-negative, and one throw followed by taking the next dart. Each fixture is
+The corpus includes a profile-view single throw, aim-pump negative, throw
+then take the next dart, and a Pixel three-dart round. Each fixture is
 replayed exactly once and must emit its declared `expectedThrowCount`.
 
 Record multiple profile-view clips for every scenario in the recorder. Keep

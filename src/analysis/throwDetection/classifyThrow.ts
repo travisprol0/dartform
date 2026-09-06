@@ -6,6 +6,10 @@ export const MIN_THROW_SCORE = 0.55;
 const MIN_OUTWARD_REACH_GAIN = 0.2;
 const MIN_OUTWARD_SPEED = 1.5;
 const MIN_RELEASE_SPEED = 3.1;
+/** Front/profile throws often travel in world Z with little image-X reach. */
+const MIN_WORLD_DEPTH_SPEED = 5.5;
+const MIN_DEPTH_RELEASE_SPEED = 6;
+const MIN_DEPTH_COVERAGE = 0.55;
 
 export type ThrowRejectionReason =
   | 'accepted'
@@ -279,8 +283,12 @@ export function classifyThrowBout(
       : 0;
   const peakWorldDepthSpeed = Math.max(0, ...worldDepthSpeeds);
 
+  const depthReach =
+    worldDepthCoverage >= MIN_DEPTH_COVERAGE
+      ? ramp(peakWorldDepthSpeed, 2.2, 6.5)
+      : 0;
   const scores: ThrowScoreComponents = {
-    outwardReach: ramp(reachGain, 0.18, 0.7),
+    outwardReach: Math.max(ramp(reachGain, 0.12, 0.7), depthReach),
     outwardSpeed: ramp(peakOutwardSpeed, 1.4, 5.5),
     elbowExtension: ramp(elbowExtensionDeg, 7, 38),
     extensionSpeed: ramp(peakExtensionVelocityDeg, 70, 320),
@@ -288,7 +296,7 @@ export function classifyThrowBout(
     elbowStability: 1 - ramp(elbowAnchorTravel, 0.35, 1),
     bodyStability: 1 - ramp(bodyMotion, 1.1, 3.2),
     worldDepthEvidence:
-      worldDepthCoverage >= 0.7
+      worldDepthCoverage >= MIN_DEPTH_COVERAGE
         ? ramp(peakWorldDepthSpeed, 1.5, 5)
         : 0.5,
   };
@@ -302,21 +310,35 @@ export function classifyThrowBout(
     scores.bodyStability * 0.03 +
     scores.worldDepthEvidence * 0.02;
 
+  const imageDelivery =
+    reachGain >= MIN_OUTWARD_REACH_GAIN &&
+    peakOutwardSpeed >= MIN_OUTWARD_SPEED;
+  const depthDelivery =
+    worldDepthCoverage >= MIN_DEPTH_COVERAGE &&
+    peakWorldDepthSpeed >= MIN_WORLD_DEPTH_SPEED &&
+    peakNormalizedWristSpeed >= MIN_DEPTH_RELEASE_SPEED &&
+    (peakOutwardSpeed >= MIN_OUTWARD_SPEED ||
+      peakExtensionVelocityDeg >= 70 ||
+      elbowExtensionDeg >= 8);
+  const littleElbowChange =
+    scores.elbowExtension < 0.12 && scores.extensionSpeed < 0.12;
+
   let reason: ThrowRejectionReason = 'accepted';
-  if (reachGain < MIN_OUTWARD_REACH_GAIN) {
-    reason = 'insufficient_outward_reach';
-  } else if (peakOutwardSpeed < MIN_OUTWARD_SPEED) {
-    reason = 'insufficient_outward_speed';
+  if (!imageDelivery && !depthDelivery) {
+    if (reachGain < MIN_OUTWARD_REACH_GAIN) {
+      reason = 'insufficient_outward_reach';
+    } else if (peakOutwardSpeed < MIN_OUTWARD_SPEED) {
+      reason = 'insufficient_outward_speed';
+    } else {
+      reason = 'insufficient_release_speed';
+    }
   } else if (peakNormalizedWristSpeed < MIN_RELEASE_SPEED) {
     reason = 'insufficient_release_speed';
-  } else if (
-    scores.elbowExtension < 0.12 &&
-    scores.extensionSpeed < 0.12
-  ) {
+  } else if (littleElbowChange && !depthDelivery) {
     reason = 'insufficient_extension';
   } else if (scores.bodyStability === 0 && score < MIN_THROW_SCORE) {
     reason = 'excessive_body_motion';
-  } else if (score < MIN_THROW_SCORE) {
+  } else if (score < MIN_THROW_SCORE && !depthDelivery) {
     reason = 'low_throw_score';
   }
 
